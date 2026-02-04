@@ -36,6 +36,8 @@ Built specifically for AI researchers and enthusiasts training custom models (Lo
 *   **NVIDIA GPU** (CUDA support is required).
 
 ### Linux Setup
+
+**Python Setup:**
 ```bash
 git clone https://github.com/Brekel/VisionCaptioner.git
 cd VisionCaptioner
@@ -43,6 +45,13 @@ python3 -m venv venv
 source venv/bin/activate
 pip3 install torch torchvision
 pip3 install -r requirements.txt
+```
+
+**Qt/GUI Dependencies (Ubuntu/Debian):**
+
+Some Linux systems may require additional packages for the Qt-based GUI to work:
+```bash
+sudo apt install libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0
 ```
 
 ### Windows Setup
