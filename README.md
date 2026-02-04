@@ -75,7 +75,7 @@ python main.py
 * Note that all settings have a tooltip description if you hover your mouse over them
 * Use the [Captions tab](readme_captions.md) to generate captions for images and videos
 * Use the [Review & Edit tab](readme_review.md) to review and edit captions
-* Use the [Video Extraction tab](readme_video_extraction.md) to extract frames from videos
+* Use the [Video Extraction tab](readme_video_extract.md) to extract frames from videos
 * Use the [Mask Segmentation tab](readme_mask_segmentation.md) to create masks for images (this is optional)
 
 ## **🖥️ CLI - Command Line Interface usage**

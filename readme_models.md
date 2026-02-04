@@ -1,4 +1,4 @@
-# Models*
+# **Models**
 
 Models can be downloaded using the built-in downloads manager on the Captions tab (📥💾 button).
 
