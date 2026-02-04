@@ -1,0 +1,31 @@
+torch
+torchvision
+transformers
+huggingface_hub
+hf_xet
+accelerate
+tic_toc
+pillow
+sentencepiece
+protobuf
+bitsandbytes; sys_platform != 'darwin'
+PySide6
+matplotlib
+tiktoken
+transformers_stream_generator
+qwen-vl-utils
+nvidia-ml-py; sys_platform != 'darwin'
+tqdm
+einops
+decord
+pycocotools
+triton-windows; sys_platform == 'win32'
+triton; sys_platform == 'linux'
+
+# Compatibility Fix: SAM3 needs Numpy 1.x, but latest OpenCV needs Numpy 2.x
+# We pin both to older versions to satisfy everyone.
+numpy<2.0
+opencv-python<4.10
+
+# Install SAM3 directly from source
+git+https://github.com/facebookresearch/sam3.git

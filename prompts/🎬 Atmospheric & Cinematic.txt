@@ -1,0 +1,5 @@
+Provide a highly detailed, cinematic description of this video clip. 
+Focus on the visual aesthetics, lighting quality (e.g., soft morning light, harsh neon, volumetric fog), and the texture of objects. 
+Describe the flow of time within the clip—how the light changes, how fabric moves, or how the subject's expression evolves. 
+Describe the camera movement in cinematographic terms (e.g., drone shot, dolly zoom, establishing shot). 
+The output should be a rich, immersive narrative suitable for training a high-end video generation model.

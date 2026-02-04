@@ -1,0 +1,100 @@
+[
+    {
+        "name": "Qwen2.5-VL-3B-Instruct",
+        "repo_id": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "folder": "Qwen2.5-VL-3B-Instruct",
+        "description": "Smallest current generation. Fast, good for low VRAM (6GB+).",
+        "gated": false
+    },
+    {
+        "name": "Qwen2.5-VL-3B-Abliterated",
+        "repo_id": "huihui-ai/Qwen2.5-VL-3B-Instruct-abliterated",
+        "folder": "Qwen2.5-VL-3B-Instruct-abliterated",
+        "description": "Uncensored/Abliterated version of 3B.",
+        "gated": false
+    },
+    {
+        "name": "Qwen2.5-VL-7B-Instruct",
+        "repo_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "folder": "Qwen2.5-VL-7B-Instruct",
+        "description": "Standard size. Best balance of quality and speed.",
+        "gated": false
+    },
+    {
+        "name": "Qwen2.5-VL-7B-Abliterated",
+        "repo_id": "huihui-ai/Qwen2.5-VL-7B-Instruct-Abliterated",
+        "folder": "Qwen2.5-VL-7B-Instruct-Abliterated",
+        "description": "Uncensored/Abliterated version of 7B.",
+        "gated": false
+    },
+    {
+        "name": "Qwen2.5-VL-7B-Caption-It",
+        "repo_id": "prithivMLmods/Qwen2.5-VL-7B-Abliterated-Caption-it",
+        "folder": "Qwen2.5-VL-7B-Abliterated-Caption-it",
+        "description": "Fine-tuned specifically for captioning.",
+        "gated": false
+    },
+    {
+        "name": "Qwen3-VL-2B-Instruct",
+        "repo_id": "Qwen/Qwen3-VL-2B-Instruct",
+        "folder": "Qwen3-VL-2B-Instruct",
+        "description": "Next-Gen Tiny. Extremely fast.",
+        "gated": false
+    },
+    {
+        "name": "Qwen3-VL-2B-Abliterated",
+        "repo_id": "huihui-ai/Huihui-Qwen3-VL-2B-Instruct-abliterated",
+        "folder": "Qwen3-VL-2B-Instruct-abliterated",
+        "description": "Uncensored Next-Gen Tiny.",
+        "gated": false
+    },
+    {
+        "name": "Qwen3-VL-4B-Instruct",
+        "repo_id": "Qwen/Qwen3-VL-4B-Instruct",
+        "folder": "Qwen3-VL-4B-Instruct",
+        "description": "Next-Gen Small. Balanced for consumer GPUs.",
+        "gated": false
+    },
+    {
+        "name": "Qwen3-VL-4B-Abliterated",
+        "repo_id": "huihui-ai/Huihui-Qwen3-VL-4B-Instruct-abliterated",
+        "folder": "Qwen3-VL-4B-Instruct-abliterated",
+        "description": "Uncensored Next-Gen Small.",
+        "gated": false
+    },
+    {
+        "name": "Qwen3-VL-8B-Instruct",
+        "repo_id": "Qwen/Qwen3-VL-8B-Instruct",
+        "folder": "Qwen3-VL-8B-Instruct",
+        "description": "Next-Gen Standard. High quality.",
+        "gated": false
+    },
+    {
+        "name": "Qwen3-VL-8B-Abliterated",
+        "repo_id": "huihui-ai/Huihui-Qwen3-VL-8B-Instruct-abliterated",
+        "folder": "Qwen3-VL-8B-Instruct-abliterated",
+        "description": "Uncensored Next-Gen Standard.",
+        "gated": false
+    },
+    {
+        "name": "Qwen3-VL-32B-Instruct",
+        "repo_id": "Qwen/Qwen3-VL-32B-Instruct",
+        "folder": "Qwen3-VL-32B-Instruct",
+        "description": "Next-Gen Large. Very heavy, requires 24GB+ VRAM.",
+        "gated": false
+    },
+    {
+        "name": "Qwen3-VL-32B-Abliterated",
+        "repo_id": "huihui-ai/Huihui-Qwen3-VL-32B-Instruct-abliterated",
+        "folder": "Qwen3-VL-32B-Instruct-abliterated",
+        "description": "Uncensored Next-Gen Large.",
+        "gated": false
+    },
+    {
+        "name": "SAM3 (Segment Anything 3)",
+        "repo_id": "facebook/sam3",
+        "folder": "sam3",
+        "description": "Required for Masking. GATED MODEL: Requires HF Token.",
+        "gated": true
+    }
+]

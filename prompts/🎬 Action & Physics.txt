@@ -1,0 +1,7 @@
+Analyze the movement and physics in this video clip. 
+Ignore fine details of the background unless they interact with the subject. 
+Focus intensely on the temporal changes: 
+- Exactly how do the subject's limbs move? 
+- Is the motion fast, slow, smooth, or jerky? 
+- Is there an interaction with objects (e.g., lifting, throwing, breaking)?
+End the description by clearly defining the camera movement relative to the subject (e.g., camera follows the subject, camera stays fixed while subject moves away).

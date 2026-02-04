@@ -1,0 +1,1 @@
+Analyze the image and write a single concise sentence that describes the main subject and setting. Keep it grounded in visible details only.

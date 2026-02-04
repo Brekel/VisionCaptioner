@@ -1,0 +1,7 @@
+Describe this video clip in a single, dense, and fluid paragraph. 
+Your description must cover the following elements in order:
+1. The Main Subject: Describe the appearance and specific actions of the primary subject. 
+2. The Motion: Explicitly describe how the subject moves over time (e.g., walking from left to right, turning around, smiling slowly).
+3. The Environment: Describe the background, lighting, and atmosphere.
+4. Camera Movement: You must explicitly state the camera behavior (e.g., static camera, slow pan right, zooming in, handheld shake, tracking shot).
+Do not use bullet points. Write in the present continuous tense (e.g., "A cat is running" rather than "A cat ran").

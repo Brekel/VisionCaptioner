@@ -1,0 +1,27 @@
+# IDEs
+.vscode/
+.idea/
+
+# OS Specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and Temp
+*.log
+*.tmp
+*.bak
+
+# Python compiled files
+__pycache__/
+*.pyc
+
+# Ignore model files, but keep the folder
+models/*
+!models/.gitkeep
+
+# Virtual Environment
+venv/
+
+# Configuration files (the GUI will create this)
+settings.json
