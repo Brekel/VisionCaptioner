@@ -834,19 +834,8 @@ class ReviewTab(QWidget):
             if not os.path.exists(uncropped_dir):
                 os.makedirs(uncropped_dir, exist_ok=True)
 
-            for i, f_path in enumerate(self.image_files):
-                # --- CHECK CANCELLATION ---
-                if progress.wasCanceled():
-                    self.log_msg.emit("⚠️ Batch crop cancelled by user.")
-                    break
-                
-                # Update Progress Bar
-                file_name = os.path.basename(f_path)
-                progress.setValue(i)
-                progress.setLabelText(f"Processing: {file_name}")
-                QCoreApplication.processEvents() # Keep UI responsive
-                # --------------------------
-
+            file_pairs = []
+            for f_path in self.image_files:
                 base, _ = os.path.splitext(f_path)
                 filename = os.path.basename(f_path)
                 base_name = os.path.splitext(filename)[0]
@@ -859,129 +848,71 @@ class ReviewTab(QWidget):
                 has_mask_file = False
                 has_alpha = False
                 
-                if not has_sub_mask:
+                final_source_type = None
+                final_mask_source = None
+                
+                if has_sub_mask:
+                    final_source_type = 'subfolder'
+                    final_mask_source = mask_path_sub
+                else:
                     has_mask_file = os.path.exists(mask_path_std)
-                    
-                    if not has_mask_file:
-                        try:
-                            with Image.open(f_path) as img_check:
-                                 if img_check.mode in ('RGBA', 'LA') or (img_check.mode == 'P' and 'transparency' in img_check.info):
-                                    img_rgba = img_check.convert("RGBA")
-                                    alpha_channel = np.array(img_rgba.split()[-1])
-                                    if np.mean(alpha_channel) < 255:
-                                         has_alpha = True
-                        except:
-                            pass
+                    if has_mask_file:
+                        final_source_type = 'file'
+                        final_mask_source = mask_path_std
+                    else:
+                        # Simple check for alpha candidacy without opening file
+                        final_source_type = 'alpha' 
 
-                # Skip if no mask exists
-                if not has_sub_mask and not has_mask_file and not has_alpha:
-                    continue
-
-                # Log the progress
-                self.log_msg.emit(f"Processing [{i+1}/{total_images}]: {file_name}")
-
-                try:
-                    # Define paths for backup
-                    uncropped_image_path = os.path.join(uncropped_dir, os.path.basename(f_path))
-                    
-                    # Load Image
-                    pil_image = Image.open(f_path)
-                    pil_image = ImageOps.exif_transpose(pil_image)
-
-                    if has_sub_mask:
-                        # Load Mask to get BBox
-                        pil_mask = Image.open(mask_path_sub)
-                        bbox = pil_mask.getbbox()
-                        
-                        if not bbox:
-                            count_skipped += 1
-                            continue
-                        
-                        # Prepare backup path (uncropped/masks/file.png)
-                        uncropped_masks_dir = os.path.join(uncropped_dir, "masks")
-                        if not os.path.exists(uncropped_masks_dir):
-                            os.makedirs(uncropped_masks_dir, exist_ok=True)
-                        uncropped_mask_path = os.path.join(uncropped_masks_dir, f"{base_name}.png")
-                        
-                        cropped_image = pil_image.crop(bbox)
-                        cropped_mask = pil_mask.crop(bbox)
-
-                        # Save Originals to backup
-                        pil_image.save(uncropped_image_path, compress_level=1)
-                        pil_mask.save(uncropped_mask_path, compress_level=1)
-                        
-                        # Overwrite files
-                        cropped_image.save(f_path, compress_level=1)
-                        cropped_mask.save(mask_path_sub, compress_level=1)
-
-                    elif has_mask_file:
-                        # Load Mask to get BBox
-                        pil_mask = Image.open(mask_path_std)
-                        bbox = pil_mask.getbbox()
-                        
-                        if not bbox:
-                            count_skipped += 1
-                            continue
-                            
-                        uncropped_mask_path = os.path.join(uncropped_dir, os.path.basename(mask_path_std))
-                        
-                        cropped_image = pil_image.crop(bbox)
-                        cropped_mask = pil_mask.crop(bbox)
-
-                        # Save Originals to backup
-                        pil_image.save(uncropped_image_path, compress_level=1)
-                        pil_mask.save(uncropped_mask_path, compress_level=1)
-                        
-                        # Overwrite files
-                        cropped_image.save(f_path, compress_level=1)
-                        cropped_mask.save(mask_path_std, compress_level=1)
-                        
-                    elif has_alpha:
-                        # Alpha Mode
-                        pil_image = pil_image.convert("RGBA")
-                        alpha = pil_image.split()[-1]
-                        bbox = alpha.getbbox()
-                        
-                        if not bbox:
-                            count_skipped += 1
-                            continue
-                            
-                        cropped_image = pil_image.crop(bbox)
-                        
-                        # Save Original to backup
-                        pil_image.save(uncropped_image_path, compress_level=1)
-                        
-                        # Overwrite file
-                        cropped_image.save(f_path, compress_level=1)
-                    
-                    count_processed += 1
-
-                except Exception as e:
-                    errors.append(f"{os.path.basename(f_path)}: {e}")
-
-            # Ensure progress bar reaches 100% visually before closing
-            progress.setValue(total_images)
-
-        finally:
-            self.setCursor(Qt.ArrowCursor)
-            progress.close() # Ensure dialog goes away
-
-        # 4. Final Reporting
-        summary = f"✅ Batch Crop Complete.\nProcessed: {count_processed}\nSkipped (empty masks/no masks): {count_skipped}"
-        if errors:
-            summary += f"\n\n❌ Errors ({len(errors)}):\n" + "\n".join(errors[:5])
-            if len(errors) > 5: summary += "\n..."
+                if final_source_type:
+                    file_pairs.append((f_path, final_mask_source, final_source_type))
             
-        self.log_msg.emit(summary.replace("\n", " | "))
-        
-        # Only show success message if not cancelled (or show it anyway, depends on preference)
-        if not progress.wasCanceled():
-            QMessageBox.information(self, "Batch Complete", summary)
+            # -------------------------------
+            
+            if not file_pairs:
+                self.log_msg.emit("⚠️ No masks (or candidates) found to crop.")
+                self.setCursor(Qt.ArrowCursor)
+                progress.close()
+                return
 
-        # 5. Refresh current view in case the current image was modified
-        self.load_image_data(self.image_files[self.current_index])
-        self.update_image_display()
-        self._update_brush_cursor_size()
+            self.log_msg.emit(f"🚀 Starting batch crop on {len(file_pairs)} images...")
+
+            # --- LAUNCH WORKER ---
+            from gui_workers import CropWorker
+            self.crop_worker = CropWorker(file_pairs, uncropped_dir)
+            
+            # Connect Signals
+            self.crop_worker.progress.connect(progress.setValue)
+            self.crop_worker.log.connect(lambda m: self.log_msg.emit(m))
+            
+            def on_finished():
+                self.setCursor(Qt.ArrowCursor)
+                progress.close()
+                
+                # Refresh file list / current view
+                self.refresh_file_list()
+                if self.current_index >= 0:
+                     self.load_image_and_data(self.current_index) # Reload current
+                
+                QMessageBox.information(self, "Batch Crop", f"Batch crop finished.\nOriginals saved to 'uncropped' folder.")
+                self.crop_worker = None # cleanup
+
+            self.crop_worker.finished.connect(on_finished)
+            
+            # Handle Progress Cancel
+            progress.canceled.connect(self.crop_worker.stop)
+            
+            # Adjust Progress Range
+            progress.setMaximum(len(file_pairs))
+            progress.setValue(0)
+            
+            self.crop_worker.start()
+            # ---------------------
+
+        except Exception as e:
+            self.setCursor(Qt.ArrowCursor)
+            progress.close()
+            self.log_msg.emit(f"❌ Batch crop failed: {e}")
+            QMessageBox.critical(self, "Error", f"An error occurred: {e}")
         
     def crop_to_mask(self):
         if self.current_index < 0 or self.cv_mask is None:

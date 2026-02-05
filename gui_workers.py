@@ -244,6 +244,143 @@ class ModelLoaderWorker(QThread):
             success, msg = self.engine.load_model(self.path, self.quant, self.res, self.attn_impl, self.use_compile)
             self.finished.emit(success, msg)
         except Exception as e:
-            import traceback
-            traceback.print_exc()
             self.finished.emit(False, f"Critical Worker Error: {e}")
+
+class CropWorker(QThread):
+    progress = Signal(int)
+    log = Signal(str)
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, file_pairs, output_dir, ignore_no_mask=True):
+        super().__init__()
+        self.file_pairs = file_pairs # List of tuples: (image_path, mask_path_or_None, has_alpha)
+        self.output_dir = output_dir
+        self.ignore_no_mask = ignore_no_mask
+        self.is_running = True
+        
+    def run(self):
+        import concurrent.futures
+        from PIL import Image, ImageOps 
+        # Import internally to ensure we don't have circular dep issues or pollution
+        
+        total_items = len(self.file_pairs)
+        completed_count = 0
+        
+        # Determine optimal worker count
+        # IO bound mixed with CPU bound (image processing)
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {executor.submit(self.process_single_crop, item): item for item in self.file_pairs}
+            
+            for future in concurrent.futures.as_completed(future_to_file):
+                if not self.is_running:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    break
+                
+                try:
+                    result_msg = future.result()
+                    if result_msg:
+                        self.log.emit(result_msg)
+                except Exception as exc:
+                    self.log.emit(f"❌ Error processing: {exc}")
+                
+                completed_count += 1
+                self.progress.emit(completed_count)
+        
+        self.finished.emit()
+
+    def process_single_crop(self, item):
+        # Unpack
+        f_path, mask_source, source_type = item 
+        # source_type: 'subfolder', 'file', 'alpha'
+        
+        if not self.is_running: return None
+        
+        try:
+            from PIL import Image, ImageOps
+            import numpy as np
+
+            uncropped_image_path = os.path.join(self.output_dir, os.path.basename(f_path))
+            filename = os.path.basename(f_path)
+            base_name = os.path.splitext(filename)[0]
+
+            # 1. Load Image
+            pil_image = Image.open(f_path)
+            pil_image = ImageOps.exif_transpose(pil_image)
+            
+            bbox = None
+            pil_mask = None
+
+            # 2. Extract BBox based on source logic
+            if source_type == 'subfolder' or source_type == 'file':
+                # Load Mask from file
+                pil_mask = Image.open(mask_source)
+                bbox = pil_mask.getbbox()
+                
+            elif source_type == 'alpha':
+                if pil_image.mode in ('RGBA', 'LA') or (pil_image.mode == 'P' and 'transparency' in pil_image.info):
+                    img_rgba = pil_image.convert("RGBA")
+                    # Invert alpha to get mask (Alpha 0 = Transparent/Background, 255 = Opaque/Foreground)
+                    # wait, getbbox works on non-zero regions.
+                    # Usually Alpha channel: 255 is Variable, 0 is Transparent.
+                    # We want to crop to the VISIBLE area (Alpha > 0).
+                    alpha = img_rgba.split()[-1]
+                    bbox = alpha.getbbox()
+                    # We don't have a separate mask file to save/crop for alpha mode specifically 
+                    # unless we want to extract it, but usually alpha crop just modifies the image.
+
+            if not bbox:
+                return f"⚠️ Skipped (Empty Mask): {filename}"
+
+            # 3. Handle Backup & Crop
+            
+            # Subfolder/File Mask Logic
+            if pil_mask:
+                uncropped_masks_dir = os.path.join(self.output_dir, "masks")
+                if not os.path.exists(uncropped_masks_dir):
+                    os.makedirs(uncropped_masks_dir, exist_ok=True)
+                    
+                # Determining backup mask name
+                if source_type == 'subfolder':
+                    uncropped_mask_path = os.path.join(uncropped_masks_dir, f"{base_name}.png")
+                else:
+                    # Same dir mask (suffix)
+                    # We should probably just move it to uncropped/masks to be clean
+                    uncropped_mask_path = os.path.join(uncropped_masks_dir, os.path.basename(mask_source))
+
+                cropped_image = pil_image.crop(bbox)
+                cropped_mask = pil_mask.crop(bbox)
+
+                # Save Originals
+                pil_image.save(uncropped_image_path, compress_level=1)
+                pil_mask.save(uncropped_mask_path, compress_level=1)
+
+                # Overwrite with Cropped
+                cropped_image.save(f_path, compress_level=1)
+                
+                # Careful not to overwrite if source was different
+                # IF source was subfolder, overwrite subfolder
+                # IF source was file, overwrite file
+                cropped_mask.save(mask_source, compress_level=1)
+
+            else:
+                # Alpha Logic
+                # Save Original
+                pil_image.save(uncropped_image_path, compress_level=1)
+                
+                # Crop
+                cropped_image = pil_image.crop(bbox)
+                
+                # Overwrite
+                cropped_image.save(f_path, compress_level=1)
+
+            return None # Success (silent to avoid log spam? or return msg?)
+            # return f"✅ Cropped: {filename}" 
+
+        except Exception as e:
+            return f"❌ Error {filename}: {str(e)}"
+
+    def stop(self):
+        self.is_running = False

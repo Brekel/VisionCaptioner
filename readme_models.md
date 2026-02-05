@@ -33,4 +33,4 @@ Models in GGUF format are supported, but require a manual installation process.
     * pip install llama-cpp-python __does not__ work!
     * you need the latest version from [GitHub](https://github.com/JamePeng/llama-cpp-python/releases)
     * download the correct wheel file for your system and install it using pip
-* Make sure you download the GGUF version of the model  and don't forget the accompanying mmproj file.
+* Make sure you download the GGUF version of the model and don't forget the accompanying mmproj file.

@@ -64,6 +64,12 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
 
+## Update
+```bash
+cd VisionCaptioner
+git pull
+```
+
 ## **🚀 Launching the Application**
 You can start the application using the provided scripts or manually via Python.
 

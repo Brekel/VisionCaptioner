@@ -71,6 +71,14 @@ class MainWindow(QMainWindow):
         sys.stdout = self.stdout_stream
         sys.stderr = self.stderr_stream
         # -------------------------------
+
+        # === STARTUP LOGGING ===
+        import torch
+        self.log(f"Python: {sys.version}")
+        self.log(f"PyTorch: {torch.__version__}")
+        self.log(f"CUDA: {torch.version.cuda if torch.cuda.is_available() else 'Not Available'}")
+        # =======================
+
         
         self.load_settings()
         
