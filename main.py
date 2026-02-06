@@ -70,15 +70,6 @@ class MainWindow(QMainWindow):
         
         sys.stdout = self.stdout_stream
         sys.stderr = self.stderr_stream
-        # -------------------------------
-
-        # === STARTUP LOGGING ===
-        import torch
-        self.log(f"Python: {sys.version}")
-        self.log(f"PyTorch: {torch.__version__}")
-        self.log(f"CUDA: {torch.version.cuda if torch.cuda.is_available() else 'Not Available'}")
-        # =======================
-
         
         self.load_settings()
         
@@ -151,7 +142,7 @@ class MainWindow(QMainWindow):
         self.main_splitter = QSplitter(Qt.Vertical)
         self.main_splitter.addWidget(self.tabs)
         
-        # Bottom Container (Stats + Log + Link)
+        # Bottom Container (Stats + Log + Footer)
         bottom_widget = QWidget()
         bottom_layout = QVBoxLayout(bottom_widget)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
@@ -174,10 +165,27 @@ class MainWindow(QMainWindow):
         self.txt_log.setMinimumHeight(50)
         bottom_layout.addWidget(self.txt_log)
         
+        # --- FOOTER (Version + Link) ---
+        footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(5, 0, 5, 5)
+        
+        import torch
+        py_ver = sys.version.split(' ')[0]
+        pt_ver = torch.__version__
+        
+        version_str = f"Python: {py_ver}    |    PyTorch: {pt_ver}"
+        self.lbl_version = QLabel(version_str)
+        self.lbl_version.setStyleSheet("color: #777; font-size: 11px;")
+        footer_layout.addWidget(self.lbl_version)
+        
+        footer_layout.addStretch()
+        
         self.lbl_link = QLabel('<a href="https://brekel.com" style="color: #999; text-decoration: none;">brekel.com</a>')
         self.lbl_link.setOpenExternalLinks(True); self.lbl_link.setAlignment(Qt.AlignRight)
-        self.lbl_link.setStyleSheet("QLabel { font-size: 11px; margin-right: 5px; margin-top: 2px; }")
-        bottom_layout.addWidget(self.lbl_link)
+        self.lbl_link.setStyleSheet("QLabel { font-size: 11px; margin-right: 5px; }")
+        footer_layout.addWidget(self.lbl_link)
+        
+        bottom_layout.addLayout(footer_layout)
         
         self.main_splitter.addWidget(bottom_widget)
         # Set initial sizes (give most space to tabs)
@@ -222,6 +230,14 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         # Set initial focus when app starts
         self.on_tab_changed(self.tabs.currentIndex())
+        
+        # Trigger background model scan (prunes cache & updates)
+        # We do this silently
+        from gui_workers import ScanWorker
+        self.scan_worker = ScanWorker()
+        self.scan_worker.log.connect(self.log)
+        self.scan_worker.finished.connect(lambda r: self.log(f"Background Model Scan: Cache updated ({len(r)} models found)."))
+        self.scan_worker.start()
 
     def lock_interface(self, locked):
         self.txt_folder.setEnabled(not locked)

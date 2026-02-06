@@ -232,6 +232,92 @@ class CaptionWorker(QThread):
         self.is_running = False
         self.requestInterruption()
 
+class ScanWorker(QThread):
+    finished = Signal(dict)
+    log = Signal(str)
+    
+    def __init__(self):
+        super().__init__()
+        self.models_dir = os.path.join(os.getcwd(), 'models')
+        
+    def run(self):
+        # Import locally to avoid circular imports
+        from model_probe import ModelProbe
+        import glob
+        
+        # Run the probe on the directory
+        if not os.path.exists(self.models_dir):
+            self.finished.emit({})
+            return
+            
+        # We manually walk and probe
+        results = {}
+        
+        # Load Cache ONCE
+        cache = ModelProbe.load_cache()
+        
+        # Prune Cache First
+        try:
+             removed = ModelProbe.prune_cache(cache)
+             if removed > 0:
+                 self.log.emit(f'Pruned {removed} stale entries from model cache.')
+        except:
+             pass
+        
+        # 1. Folders
+        subdirs = [os.path.join(self.models_dir, d) for d in os.listdir(self.models_dir) if os.path.isdir(os.path.join(self.models_dir, d))]
+        for d in subdirs:
+            if os.path.basename(d).startswith('_'): continue
+            
+            # Smart Logging: Only log if NOT in cache or mtime changed
+            path = os.path.abspath(d)
+            should_log = True
+            if path in cache:
+                if cache[path].get("_mtime") == os.path.getmtime(path):
+                    should_log = False
+            
+            if should_log:
+                self.log.emit(f"Scanning model folder: {os.path.basename(d)}...")
+                
+            info = ModelProbe.probe(d, cache=cache)
+            if 'error' not in info:
+                results[os.path.basename(d)] = info
+
+        # 2. Files
+        files = glob.glob(os.path.join(self.models_dir, '*.gguf'))
+        for f in files:
+            if os.path.basename(f).startswith('_') or 'mmproj' in os.path.basename(f).lower(): continue
+            
+            path = os.path.abspath(f)
+            should_log = True
+            if path in cache:
+                if cache[path].get("_mtime") == os.path.getmtime(path):
+                    should_log = False
+            
+            if should_log:
+                self.log.emit(f"Scanning GGUF file: {os.path.basename(f)}...")
+            
+            info = ModelProbe.probe(f, cache=cache)
+            if 'error' not in info:
+                results[os.path.basename(f)] = info
+                # Report Projector Status if we just scanned (or always? User said "when probing... log also")
+                # Even if cached, user might want to know? 
+                # User said "It can take a while... make it log what it's doing".
+                # If cached, it's instant, so maybe no log needed.
+                # But "when probing a gguf file it would be nice that when it's done the log also shows..."
+                # I'll stick to logging ONLY if we did a fresh scan (should_log=True) to keep it clean as requested.
+                if should_log and not info.get('unified_vision', False):
+                    proj = info.get('mmproj_detected')
+                    if proj:
+                        self.log.emit(f"  -> Found external projector: {os.path.basename(proj)}")
+                    else:
+                        self.log.emit(f"  -> No matching projector found.")
+                
+        # Save cache after scan
+        ModelProbe.save_cache(cache)
+        self.finished.emit(results)
+        self.requestInterruption()
+
 class ModelLoaderWorker(QThread):
     finished = Signal(bool, str)
     def __init__(self, engine, path, quant, res, attn_impl="sdpa", use_compile=False):

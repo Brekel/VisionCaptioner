@@ -3,6 +3,7 @@ torchvision
 transformers
 huggingface_hub
 hf_xet
+gguf
 accelerate
 tic_toc
 pillow

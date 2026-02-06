@@ -1,5 +1,12 @@
 [
     {
+        "name": "SAM3 (Segment Anything 3)",
+        "repo_id": "facebook/sam3",
+        "folder": "sam3",
+        "description": "Required for Masking. GATED MODEL: Requires HF Token.",
+        "gated": true
+    },
+    {
         "name": "Qwen2.5-VL-3B-Instruct",
         "repo_id": "Qwen/Qwen2.5-VL-3B-Instruct",
         "folder": "Qwen2.5-VL-3B-Instruct",
@@ -89,12 +96,5 @@
         "folder": "Qwen3-VL-32B-Instruct-abliterated",
         "description": "Uncensored Next-Gen Large.",
         "gated": false
-    },
-    {
-        "name": "SAM3 (Segment Anything 3)",
-        "repo_id": "facebook/sam3",
-        "folder": "sam3",
-        "description": "Required for Masking. GATED MODEL: Requires HF Token.",
-        "gated": true
     }
 ]

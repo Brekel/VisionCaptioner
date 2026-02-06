@@ -25,3 +25,4 @@ venv/
 
 # Configuration files (the GUI will create this)
 settings.json
+model_cache.json
