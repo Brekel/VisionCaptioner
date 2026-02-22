@@ -214,12 +214,12 @@ class CaptionsTab(QWidget):
 
         # Buttons
         test_layout = QHBoxLayout()
-        self.btn_test_first = QPushButton("TEST FIRST IMAGE")
+        self.btn_test_first = QPushButton("TEST FIRST IMAGE/VIDEO")
         self.btn_test_first.clicked.connect(lambda: self.run_test("first"))
         self.btn_test_first.setMinimumHeight(40)
         self.btn_test_first.setToolTip("Process the first image in the folder alphabetically. Useful for comparing settings on the same file.")
 
-        self.btn_test_rand = QPushButton("TEST RANDOM IMAGE")
+        self.btn_test_rand = QPushButton("TEST RANDOM IMAGE/VIDEO")
         self.btn_test_rand.clicked.connect(lambda: self.run_test("random"))
         self.btn_test_rand.setMinimumHeight(40)
         self.btn_test_rand.setToolTip("Pick one random file from the folder and caption it to test settings.")

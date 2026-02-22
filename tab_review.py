@@ -389,6 +389,7 @@ class ReviewTab(QWidget):
         # Container widget to easily hide/show
         self.wid_video_controls = QWidget()
         self.wid_video_controls.setLayout(self.video_controls_layout)
+        self.wid_video_controls.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.wid_video_controls.setVisible(False) # Hide by default
         
         # Caption Edit
@@ -411,7 +412,7 @@ class ReviewTab(QWidget):
         top_pane = QWidget()
         top_layout = QVBoxLayout(top_pane)
         top_layout.setContentsMargins(0,0,0,0)
-        top_layout.addWidget(self.lbl_image)
+        top_layout.addWidget(self.lbl_image, stretch=1)
         top_layout.addWidget(self.wid_video_controls)
         
         self.vertical_splitter.addWidget(top_pane)
@@ -1124,32 +1125,29 @@ class ReviewTab(QWidget):
             QMessageBox.critical(self, "Move Failed", f"Error moving files:\n{e}")
             return
 
-        # 5. Remove from UI immediately
+        # 5. Calculate the next index to select after the refresh
+        # (Stay on the same index, unless we deleted the very last item)
+        target_index = min(self.current_index, len(self.image_files) - 2)
+        target_index = max(0, target_index)
+
+        # 6. Perform a full refresh of the file list to ensure sync with the folder
         self.list_widget.blockSignals(True)
-        self.list_widget.takeItem(self.current_index)
-        del self.image_files[self.current_index]
+        self.refresh_file_list()
         self.list_widget.blockSignals(False)
 
-        # 6. Select the next image
-        self.update_stats()
-        self.slider.setMaximum(max(0, len(self.image_files) - 1))
-
-        new_count = len(self.image_files)
-        if new_count > 0:
-            # Go to the same index (which is now the next image)
-            # or the last image if we deleted the very last one.
-            new_index = min(self.current_index, new_count - 1)
-            self.list_widget.setCurrentRow(new_index)
-            
-            # Force refresh
-            if self.list_widget.currentRow() == new_index:
-                self.on_row_changed(new_index) 
+        # 7. Select the next image
+        if len(self.image_files) > 0:
+            self.list_widget.setCurrentRow(target_index)
+            # Force UI update for the newly selected image
+            if self.list_widget.currentRow() == target_index:
+                self.on_row_changed(target_index)
         else:
             # Folder is now empty
             self.current_index = -1
             self.lbl_image.set_image(None)
             self.txt_caption.setPlainText("")
             self.lbl_info.setText("0 / 0")
+
 
     def fill_mask(self, color):
         if self.cv_img_original is None: return

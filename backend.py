@@ -236,7 +236,8 @@ class QwenEngine:
                 try:
                     llm_kwargs = {
                         "model_path": model_path,
-                        "n_ctx": 8192,  # Reasonable default
+                        "n_ctx": 32768,  # Large context needed for multi-frame video (each frame = many vision tokens)
+                        "n_batch": 32768, # Must match n_ctx for large vision batches
                         "n_gpu_layers": n_gpu_layers,
                         "verbose": False,
                         "chat_handler": chat_handler,
