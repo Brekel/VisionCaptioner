@@ -120,11 +120,13 @@ class MainWindow(QMainWindow):
         # 1. Video Extraction Tab (New)
         self.tab_video = VideoTab(self.sam_engine)
         self.tab_video.log_msg.connect(self.log)
-        
+        self.tab_video.work_finished.connect(self._try_unload_sam3)
+
         # 2. Mask Tab (Pass shared engine)
         self.tab_mask = MaskTab(self.sam_engine)
         self.tab_mask.log_msg.connect(self.log)
-        self.tab_mask.batch_finished.connect(self.play_notification) 
+        self.tab_mask.batch_finished.connect(self.play_notification)
+        self.tab_mask.batch_finished.connect(self._try_unload_sam3)
         
         # 3. Captions Tab
         self.tab_gen = CaptionsTab(self.engine)
@@ -245,7 +247,29 @@ class MainWindow(QMainWindow):
         elif current_tab == self.tab_qa:
             self.tab_qa.refresh_file_list()
             self.tab_qa.set_focus_to_image()
-    
+        self._try_unload_sam3()
+
+    def _is_sam3_busy(self):
+        """Check if any SAM3 worker is currently running."""
+        if self.tab_video.worker and self.tab_video.worker.isRunning():
+            return True
+        if hasattr(self.tab_video, 'grab_worker') and self.tab_video.grab_worker and self.tab_video.grab_worker.isRunning():
+            return True
+        if self.tab_mask.worker and self.tab_mask.worker.isRunning():
+            return True
+        if self.tab_mask.loader_worker and self.tab_mask.loader_worker.isRunning():
+            return True
+        return False
+
+    def _try_unload_sam3(self):
+        """Unload SAM3 if not on a SAM3 tab and no SAM3 work is in progress."""
+        current_tab = self.tabs.currentWidget()
+        on_sam3_tab = current_tab in (self.tab_video, self.tab_mask)
+        if not on_sam3_tab and not self._is_sam3_busy():
+            if self.sam_engine.model is not None:
+                self.log("♻️ Auto-unloading SAM3 model (left SAM3 tabs)")
+                self.sam_engine.unload()
+
     def showEvent(self, event):
         """Called when the window is first shown."""
         super().showEvent(event)

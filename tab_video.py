@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QSplitter, QCheckBox, QSpinBox, QDoubleSpinBox,
                                QSizePolicy, QFileDialog, QSlider, QStyle)
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QMutex, QWaitCondition
-from PySide6.QtGui import QImage, QPixmap, QDragEnterEvent, QDropEvent, QIcon
+from PySide6.QtGui import QImage, QPixmap, QDragEnterEvent, QDropEvent, QIcon, QKeySequence, QShortcut
 from gui_widgets import ResizableImageLabel
 from gui_model_manager import ModelManagerDialog
 
@@ -188,6 +188,97 @@ def save_image_task(img, path, quality=95):
     except Exception as e:
         print(f"Save error: {e}")
 
+# Single Frame Grab Worker
+class SingleFrameWorker(QThread):
+    log_msg = Signal(str)
+    status_update = Signal(str)
+    finished = Signal(bool, str)  # success, message
+
+    def __init__(self, engine, video_path, frame_idx, output_folder, prompt, sam_settings, output_flags):
+        super().__init__()
+        self.engine = engine
+        self.video_path = video_path
+        self.frame_idx = frame_idx
+        self.output_folder = output_folder
+        self.prompt = prompt
+        self.sam_settings = sam_settings
+        self.output_flags = output_flags
+
+    def run(self):
+        try:
+            model_path = os.path.join(os.getcwd(), "models", "sam3")
+            if not self.engine.model:
+                self.log_msg.emit("⏳ Auto-loading SAM3 model...")
+                self.status_update.emit("⏳ Loading SAM3 model...")
+                success, msg = self.engine.load_model(model_path)
+                if not success:
+                    self.log_msg.emit(f"❌ Model Load Failed: {msg}")
+                    self.finished.emit(False, f"Model load failed: {msg}")
+                    return
+
+            self.status_update.emit("Reading frame...")
+            cap = cv2.VideoCapture(self.video_path)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, self.frame_idx)
+            ret, frame = cap.read()
+            cap.release()
+
+            if not ret:
+                self.finished.emit(False, "Failed to read frame from video.")
+                return
+
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(frame_rgb)
+
+            self.status_update.emit("Generating mask...")
+            mask_img, msg = self.engine.generate_mask(
+                pil_img,
+                self.prompt,
+                max_dimension=self.sam_settings['max_res'],
+                conf_threshold=self.sam_settings['conf'],
+                expand_ratio=self.sam_settings['expand']
+            )
+
+            if not os.path.exists(self.output_folder):
+                os.makedirs(self.output_folder)
+
+            base_filename = os.path.splitext(os.path.basename(self.video_path))[0]
+            saved_files = []
+
+            if mask_img:
+                save_img = pil_img
+                save_mask = mask_img
+                suffix = ""
+
+                if self.sam_settings['crop']:
+                    bbox = mask_img.getbbox()
+                    if bbox:
+                        save_img = pil_img.crop(bbox)
+                        save_mask = mask_img.crop(bbox)
+                    else:
+                        suffix = "_empty"
+
+                frame_name = f"{base_filename}_frame_{self.frame_idx:06d}{suffix}.jpg"
+                mask_name = f"{base_filename}_frame_{self.frame_idx:06d}{suffix}-masklabel.png"
+
+                if self.output_flags['save_color']:
+                    out_path = os.path.join(self.output_folder, frame_name)
+                    save_img.save(out_path, quality=95)
+                    saved_files.append(frame_name)
+                if self.output_flags['save_mask']:
+                    out_path = os.path.join(self.output_folder, mask_name)
+                    save_mask.save(out_path)
+                    saved_files.append(mask_name)
+
+                self.log_msg.emit(f"📸 Grabbed frame {self.frame_idx}: {', '.join(saved_files)}")
+                self.finished.emit(True, f"Saved {len(saved_files)} file(s) for frame {self.frame_idx}")
+            else:
+                self.log_msg.emit(f"⚠️ No mask generated for frame {self.frame_idx} (nothing detected)")
+                self.finished.emit(True, f"No object detected in frame {self.frame_idx}")
+
+        except Exception as e:
+            self.log_msg.emit(f"❌ Grab frame error: {e}")
+            self.finished.emit(False, str(e))
+
 # Main Worker
 class VideoExtractWorker(QThread):
     progress = Signal(int, int, float, int, int, int, int, str) 
@@ -347,8 +438,6 @@ class VideoExtractWorker(QThread):
                 self.save_executor.shutdown(wait=True)
 
             total_time = time.time() - start_time_global
-            self.log_msg.emit("♻️ Unloading SAM3 model...")
-            self.engine.unload()
             self.finished.emit(saved_count, scanned_count, total_time)
 
     def stop(self):
@@ -358,6 +447,7 @@ class VideoExtractWorker(QThread):
 
 class VideoTab(QWidget):
     log_msg = Signal(str)
+    work_finished = Signal()
 
     def __init__(self, sam_engine):
         super().__init__()
@@ -523,6 +613,16 @@ class VideoTab(QWidget):
         self.btn_play_preview.setEnabled(False)
         self.btn_play_preview.clicked.connect(self.toggle_playback)
         slider_layout.addWidget(self.btn_play_preview)
+
+        # Grab Frame Button
+        self.btn_grab_frame = QPushButton("Grab Frame (G)")
+        self.btn_grab_frame.setFixedHeight(30)
+        self.btn_grab_frame.setEnabled(False)
+        self.btn_grab_frame.setStyleSheet("QPushButton { background-color: #d6a316; color: white; font-weight: bold; border-radius: 4px; padding: 0 10px; } QPushButton:hover:!disabled { background-color: #c49515; } QPushButton:disabled { background-color: #555; color: #888; }")
+        self.btn_grab_frame.clicked.connect(self.grab_current_frame)
+        self.shortcut_grab = QShortcut(QKeySequence("G"), self)
+        self.shortcut_grab.activated.connect(self.grab_current_frame)
+        slider_layout.addWidget(self.btn_grab_frame)
 
         self.lbl_time = QLabel("00:00:00")
         self.slider = QSlider(Qt.Horizontal)
@@ -695,6 +795,7 @@ class VideoTab(QWidget):
         self.slider.setValue(0)
         self.slider.setEnabled(True)
         self.btn_play_preview.setEnabled(True)
+        self.btn_grab_frame.setEnabled(True)
         self.set_playback_ui(False)
         
         self.spin_start.setRange(0, self.total_frames - 1)
@@ -743,6 +844,74 @@ class VideoTab(QWidget):
         self.is_playing_preview = playing
         icon = QStyle.SP_MediaPause if playing else QStyle.SP_MediaPlay
         self.btn_play_preview.setIcon(self.style().standardIcon(icon))
+
+    def grab_current_frame(self):
+        # Ignore shortcut if a text input has focus (e.g. prompt field)
+        focused = self.focusWidget()
+        if isinstance(focused, (QLineEdit, QSpinBox, QDoubleSpinBox)):
+            return
+        if not self.video_path or not self.video_loaded:
+            return
+
+        prompt = self.txt_prompt.text().strip()
+        if not prompt:
+            QMessageBox.warning(self, "Missing Prompt", "Please enter a prompt (e.g., 'person').")
+            return
+
+        if not self.chk_save_img.isChecked() and not self.chk_save_mask.isChecked():
+            QMessageBox.warning(self, "No Output", "Select at least one output type (Color or Mask).")
+            return
+
+        out_folder = self.current_folder
+        if not out_folder or not os.path.exists(out_folder):
+            ret = QMessageBox.warning(self, "No Output Folder",
+                "The main output folder is not set.\nSave to video location instead?", QMessageBox.Yes | QMessageBox.No)
+            if ret == QMessageBox.Yes:
+                out_folder = os.path.dirname(self.video_path)
+            else:
+                return
+
+        # Pause preview
+        if self.preview_worker and self.is_playing_preview:
+            self.preview_worker.pause()
+            self.set_playback_ui(False)
+
+        frame_idx = self.slider.value()
+
+        sam_settings = {
+            'max_res': self.spin_res.value(),
+            'conf': self.spin_conf.value(),
+            'expand': self.spin_expand.value() / 100.0,
+            'crop': self.chk_crop.isChecked()
+        }
+        output_flags = {
+            'save_color': self.chk_save_img.isChecked(),
+            'save_mask': self.chk_save_mask.isChecked()
+        }
+
+        self.toggle_ui(False)
+        self.progress.setRange(0, 0)  # indeterminate
+        self.progress.setFormat(f"Grabbing frame {frame_idx}...")
+
+        self.grab_worker = SingleFrameWorker(
+            self.sam_engine, self.video_path, frame_idx,
+            out_folder, prompt, sam_settings, output_flags
+        )
+        self.grab_worker.log_msg.connect(self.log_msg.emit)
+        self.grab_worker.status_update.connect(lambda s: self.progress.setFormat(s))
+        self.grab_worker.finished.connect(self.on_grab_finished)
+        self.grab_worker.start()
+
+    def on_grab_finished(self, success, message):
+        self.toggle_ui(True)
+        self.progress.setRange(0, 100)
+        if success:
+            self.progress.setValue(100)
+            self.progress.setFormat(f"Done: {message}")
+        else:
+            self.progress.setValue(0)
+            self.progress.setFormat(f"Error: {message}")
+        self.work_finished.emit()
 
     def on_slider_changed(self):
         frame = self.slider.value()
@@ -988,6 +1157,7 @@ class VideoTab(QWidget):
         self.progress.setValue(100)
         self.progress.setFormat(f"Complete! Saved: {saved} | Time: {total_time:.1f}s")
         QMessageBox.information(self, "Extraction Complete", f"Finished.\nSaved {saved} items.")
+        self.work_finished.emit()
 
     def stop_processing(self):
         if self.worker:
@@ -1002,6 +1172,7 @@ class VideoTab(QWidget):
         self.btn_process.setEnabled(start_enabled)
         self.slider.setEnabled(start_enabled)
         self.btn_play_preview.setEnabled(start_enabled)
+        self.btn_grab_frame.setEnabled(start_enabled)
         self.btn_set_start.setEnabled(start_enabled)
         self.btn_set_end.setEnabled(start_enabled)
         

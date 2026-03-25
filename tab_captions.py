@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QProgressBar, QComboBox, QCheckBox, QTextEdit, QSpinBox, 
                                QGroupBox, QSplitter, QSizePolicy, QApplication, QLineEdit,
                                QMessageBox, QGridLayout)
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QByteArray
 from gui_widgets import ResizableImageLabel
 from gui_workers import ModelLoaderWorker, TestWorker, CaptionWorker
 from gui_model_manager import ModelManagerDialog
@@ -406,7 +406,8 @@ class CaptionsTab(QWidget):
             "trigger": self.txt_trigger.text(),
             "system_prompt_idx": self.combo_prompts.currentIndex(),
             "prompt_text": self.txt_prompt.toPlainText(),
-            "suffix": self.txt_suffix.toPlainText()
+            "suffix": self.txt_suffix.toPlainText(),
+            "splitter_state": self.splitter.saveState().toHex().data().decode()
         }
 
     def set_settings(self, settings):
@@ -444,6 +445,10 @@ class CaptionsTab(QWidget):
         # Explicitly set prompt text last
         if "prompt_text" in settings:
             self.txt_prompt.setPlainText(settings["prompt_text"])
+
+        if "splitter_state" in settings:
+            try: self.splitter.restoreState(QByteArray.fromHex(settings["splitter_state"].encode()))
+            except: pass
 
     def load_model(self):
         self.toggle_ui(False)

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QLineEdit, QProgressBar, QGroupBox, QMessageBox,
                                QSplitter, QApplication, QCheckBox, QSpinBox, QDoubleSpinBox,
                                QSizePolicy, QComboBox)
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QByteArray
 from PySide6.QtGui import QPixmap, QImage
 from PIL import Image, ImageOps 
 
@@ -316,7 +316,8 @@ class MaskTab(QWidget):
         right_layout = QVBoxLayout(right_panel)
 
         # Preview Area
-        splitter = QSplitter(Qt.Horizontal)
+        self.splitter = QSplitter(Qt.Horizontal)
+        splitter = self.splitter
         
         self.lbl_orig = ResizableImageLabel()
         self.lbl_orig.setText("Original Image")
@@ -427,7 +428,8 @@ class MaskTab(QWidget):
             "expand_percent": self.spin_expand.value(),
             "skip_existing": self.chk_skip.isChecked(),
             "crop_to_mask": self.chk_crop.isChecked(),
-            "mask_format_index": self.combo_format.currentIndex()
+            "mask_format_index": self.combo_format.currentIndex(),
+            "splitter_state": self.splitter.saveState().toHex().data().decode()
         }
 
     def set_settings(self, settings):
@@ -438,6 +440,9 @@ class MaskTab(QWidget):
         if "skip_existing" in settings: self.chk_skip.setChecked(bool(settings["skip_existing"]))
         if "crop_to_mask" in settings: self.chk_crop.setChecked(bool(settings["crop_to_mask"]))
         if "mask_format_index" in settings: self.combo_format.setCurrentIndex(int(settings["mask_format_index"]))
+        if "splitter_state" in settings:
+            try: self.splitter.restoreState(QByteArray.fromHex(settings["splitter_state"].encode()))
+            except: pass
 
     # --- Logic ---
     def open_manager_for_sam(self):
@@ -575,11 +580,7 @@ class MaskTab(QWidget):
 
     def on_worker_finished(self, total_time=0.0, avg_speed=0.0):
         self.log_msg.emit("✅ Generation sequence ended.")
-        self.log_msg.emit("♻️ Unloading SAM3 model...")
-        
         self.lbl_status.setText(f"Complete. Total: {total_time:.1f}s")
-        
-        self.sam_engine.unload()
         self.cleanup_ui_state()
         self.log_msg.emit("Ready.")
         self.batch_finished.emit()

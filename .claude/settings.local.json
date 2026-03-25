@@ -15,7 +15,9 @@
       "Bash(python -c \"from tab_qa import QATab; print\\(''OK''\\)\")",
       "Bash(python -c \"import sys; print\\(sys.version\\)\")",
       "Bash(python -c \"import mediapipe; print\\(''mediapipe'', mediapipe.__version__\\)\")",
-      "Bash(venv/Scripts/pip install:*)"
+      "Bash(venv/Scripts/pip install:*)",
+      "Bash(grep -n \"settings.json\\\\|SETTINGS_FILE\" \"e:/_python_tools/VisionCaptioner/\"*.py)",
+      "Bash(grep -n \"splitterMoved\\\\|resizeEvent\\\\|showEvent\" \"e:/_python_tools/VisionCaptioner/\"*.py)"
     ]
   }
 }
