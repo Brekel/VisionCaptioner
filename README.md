@@ -33,7 +33,8 @@ Built specifically for AI researchers and enthusiasts training custom models (Lo
 
 ### **Prerequisites**
 *   **Python 3.10+**
-*   **NVIDIA GPU** (CUDA support is required).
+*   **NVIDIA GPU** (with CUDA).
+*   **AMD GPU** (with ROCm on Linux)
 
 ### Linux Setup
 
@@ -43,10 +44,13 @@ git clone https://github.com/Brekel/VisionCaptioner.git
 cd VisionCaptioner
 python3 -m venv venv
 source venv/bin/activate
-pip3 install torch torchvision
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip3 install -r requirements.txt
 ```
-
+***AMD GPU with ROCm support should work under Linux when using different pytorch install command:***
+```bash
+pip3 install torch torchvision --index-url https://download.pytorch.org/whl/rocm7.1
+```
 **Qt/GUI Dependencies (Ubuntu/Debian):**
 
 Some Linux systems may require additional packages for the Qt-based GUI to work:
@@ -63,6 +67,10 @@ python -m venv venv
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip install -r requirements.txt
 ```
+
+***AMD GPU with ROCm support for Windows, more info here:***
+https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html
+
 
 ## Update
 ```bash
