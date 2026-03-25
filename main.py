@@ -6,7 +6,7 @@ import json
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QCheckBox,
                                QHBoxLayout, QPushButton, QFileDialog, QTabWidget,
                                QTextEdit, QProgressBar, QLabel, QGroupBox, QSplashScreen, QSplitter)
-from PySide6.QtGui import QIcon, QPixmap, QFont, QColor, QTextCursor
+from PySide6.QtGui import QIcon, QPixmap, QFont, QColor, QTextCursor, QDesktopServices
 from PySide6.QtCore import Qt, QByteArray, QUrl, Signal, QObject
 from PySide6.QtMultimedia import QSoundEffect
 
@@ -23,6 +23,7 @@ CaptionsTab = None
 ReviewTab = None
 MaskTab = None
 VideoTab = None
+QATab = None
 
 SETTINGS_FILE = "settings.json"
 
@@ -91,19 +92,25 @@ class MainWindow(QMainWindow):
         self.btn_browse.clicked.connect(self.browse_folder)
         self.btn_browse.setToolTip("Open file explorer to select folder.")
         
+        self.btn_open_folder = QPushButton("📂")
+        self.btn_open_folder.setToolTip("Open current folder in file explorer")
+        self.btn_open_folder.setFixedWidth(32)
+        self.btn_open_folder.clicked.connect(self.open_folder_in_explorer)
+
         self.chk_sound = QCheckBox("🔊")
         self.chk_sound.setToolTip("Play sound when processing finishes")
         self.chk_sound.setChecked(True)
-        
+
         # Initialize Sound Effect
         self.sound_player = QSoundEffect()
         # Ensure you have a 'notification.wav' in your folder
         wav_path = os.path.join(os.getcwd(), "notification.wav")
         self.sound_player.setSource(QUrl.fromLocalFile(wav_path))
         self.sound_player.setVolume(0.5) # 0.0 to 1.0
-        
+
         top_bar.addWidget(self.txt_folder)
         top_bar.addWidget(self.btn_browse)
+        top_bar.addWidget(self.btn_open_folder)
         top_bar.addWidget(self.chk_sound)
         layout.addLayout(top_bar)
 
@@ -129,11 +136,16 @@ class MainWindow(QMainWindow):
         self.tab_rev = ReviewTab()
         self.tab_rev.log_msg.connect(self.log)
 
+        # 5. QA Tab
+        self.tab_qa = QATab()
+        self.tab_qa.log_msg.connect(self.log)
+
         # Add Tabs in Order
         self.tabs.addTab(self.tab_video, "Video Extract")
         self.tabs.addTab(self.tab_mask, "Mask Segmentation")
         self.tabs.addTab(self.tab_gen, "Captions")
         self.tabs.addTab(self.tab_rev, "Review && Edit")
+        self.tabs.addTab(self.tab_qa, "Quality Assurance")
         
         self.tabs.setCurrentWidget(self.tab_gen)
         self.tabs.currentChanged.connect(self.on_tab_changed)
@@ -212,18 +224,27 @@ class MainWindow(QMainWindow):
         f = QFileDialog.getExistingDirectory(self, "Select Folder", start_dir)
         if f: self.txt_folder.setText(f)
 
+    def open_folder_in_explorer(self):
+        folder = self.txt_folder.text()
+        if folder and os.path.isdir(folder):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
     def on_folder_changed(self, text):
         if os.path.exists(text):
             self.tab_gen.update_folder(text)
             self.tab_rev.update_folder(text)
             self.tab_mask.update_folder(text)
             self.tab_video.update_folder(text)
+            self.tab_qa.update_folder(text)
 
     def on_tab_changed(self, index):
         current_tab = self.tabs.widget(index)
         if current_tab == self.tab_rev:
             self.tab_rev.refresh_file_list()
             self.tab_rev.set_focus_to_image() # <-- SET FOCUS
+        elif current_tab == self.tab_qa:
+            self.tab_qa.refresh_file_list()
+            self.tab_qa.set_focus_to_image()
     
     def showEvent(self, event):
         """Called when the window is first shown."""
@@ -259,7 +280,8 @@ class MainWindow(QMainWindow):
         data = { "folder": self.txt_folder.text(), "geometry": self.saveGeometry().toHex().data().decode(),
                  "main_splitter_state": self.main_splitter.saveState().toHex().data().decode(),
                  "generate_tab": self.tab_gen.get_settings(), "review_tab": self.tab_rev.get_settings(),
-                 "mask_tab": self.tab_mask.get_settings(), "video_tab": self.tab_video.get_settings() }
+                 "mask_tab": self.tab_mask.get_settings(), "video_tab": self.tab_video.get_settings(),
+                 "qa_tab": self.tab_qa.get_settings() }
         try:
             with open(SETTINGS_FILE, 'w') as f: json.dump(data, f, indent=4)
         except Exception as e: print(f"Failed to save settings: {e}")
@@ -275,6 +297,7 @@ class MainWindow(QMainWindow):
                 if "review_tab" in data: self.tab_rev.set_settings(data["review_tab"])
                 if "mask_tab" in data: self.tab_mask.set_settings(data["mask_tab"])
                 if "video_tab" in data: self.tab_video.set_settings(data["video_tab"])
+                if "qa_tab" in data: self.tab_qa.set_settings(data["qa_tab"])
             except Exception as e: print(f"Failed to load settings: {e}")
 
     def closeEvent(self, event):
@@ -297,6 +320,11 @@ class MainWindow(QMainWindow):
         if hasattr(self.tab_video, 'worker') and self.tab_video.worker and self.tab_video.worker.isRunning():
             self.tab_video.worker.stop()
             self.tab_video.worker.wait(100)
+
+        # Clean up QA Worker if running
+        if hasattr(self.tab_qa, 'worker') and self.tab_qa.worker and self.tab_qa.worker.isRunning():
+            self.tab_qa.worker.stop()
+            self.tab_qa.worker.wait(100)
             
         # Unload engines
         if self.sam_engine: self.sam_engine.unload()
@@ -338,7 +366,7 @@ def apply_dark_theme(app):
 def do_deferred_imports(splash, app):
     """Import heavy modules after splash is visible, with progress updates."""
     global QwenEngine, SAM3Engine, DropLineEdit, GPUMonitorWorker
-    global CaptionsTab, ReviewTab, MaskTab, VideoTab
+    global CaptionsTab, ReviewTab, MaskTab, VideoTab, QATab
     
     def update_splash(msg):
         splash.showMessage(msg, Qt.AlignBottom | Qt.AlignCenter, Qt.white)
@@ -374,7 +402,11 @@ def do_deferred_imports(splash, app):
     update_splash("Loading Video tab...")
     from tab_video import VideoTab as _VideoTab
     VideoTab = _VideoTab
-    
+
+    update_splash("Loading QA tab...")
+    from tab_qa import QATab as _QATab
+    QATab = _QATab
+
     update_splash("Initializing main window...")
 
 if __name__ == "__main__":

@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /e/_python_tools/VisionCaptioner/*.py)",
+      "Bash(python -c \"import cv2; print\\(cv2.__version__\\); print\\(dir\\(cv2.dnn\\)\\)\")",
+      "Bash(python -c \"print\\(hasattr\\(__import__\\(''cv2''\\), ''FaceDetectorYN''\\)\\)\")",
+      "Bash(python -c \"print\\(hasattr\\(__import__\\(''cv2''\\), ''FaceRecognizerSF''\\)\\)\")",
+      "Bash(python -c \":*)",
+      "Bash(python -c \"import cv2; print\\(cv2.__version__\\); print\\(hasattr\\(cv2, ''FaceDetectorYN''\\)\\)\")",
+      "Bash(python -c \"import cv2; print\\(cv2.data.haarcascades\\)\")",
+      "Bash(ls \"E:\\\\_python_tools\\\\VisionCaptioner\\\\venv\\\\Lib\\\\site-packages\\\\cv2\\\\data\\\\haarcascade_eye\"*)",
+      "Bash(python -c \"from tab_qa import QATab; print\\(''QATab imported successfully''\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\(''main.py'', doraise=True\\); print\\(''main.py syntax OK''\\)\")",
+      "Bash(timeout 20 python main.py)",
+      "Bash(python -c \"from tab_qa import QATab; print\\(''OK''\\)\")",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(python -c \"import mediapipe; print\\(''mediapipe'', mediapipe.__version__\\)\")",
+      "Bash(venv/Scripts/pip install:*)"
+    ]
+  }
+}

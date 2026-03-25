@@ -26,6 +26,9 @@ Built specifically for AI researchers and enthusiasts training custom models (Lo
     *   **Compatibility with [OneTrainer](https://github.com/Nerogar/OneTrainer)**
     *   **Potentially compatible with other/future training tools**
 *   **Video Extraction** Functionality to extract frames from videos containing a prompted subject.
+*   **Quality Assurance** Analyze images for blur, resolution, face/eyes detection, and missing masks.
+    *   **Scoring** Weighted quality scoring with sortable table view.
+    *   **Batch Actions** Apply actions to all images below a quality threshold.
 *   **Local Execution:** Runs entirely on your machine for privacy and control.
 *   **CommandLine Interface:** Option to use this from the commandline and/or scripts.
 
@@ -100,6 +103,7 @@ python main.py
 * Use the [Review & Edit tab](readme_review.md) to review and edit captions
 * Use the [Video Extraction tab](readme_video_extract.md) to extract frames from videos
 * Use the [Mask Segmentation tab](readme_mask_segmentation.md) to create masks for images (this is optional)
+* Use the [Quality Assurance tab](readme_quality_assurance.md) to analyze and curate image quality in your dataset
 
 ## **🖥️ CLI - Command Line Interface usage**
 * For advanced users, the tool can be used from the commandline or scripts

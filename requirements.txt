@@ -20,6 +20,7 @@ tqdm
 einops
 decord
 pycocotools
+mediapipe
 triton-windows; sys_platform == 'win32'
 triton; sys_platform == 'linux'
 
