@@ -2,7 +2,9 @@ import os
 import glob
 import json
 import shutil
+import threading
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
@@ -38,10 +40,10 @@ class QAAnalysisWorker(QThread):
         self.folder = folder
         self._stop = False
 
-        # Lazy-loaded detectors
-        self._face_landmarker = None       # MediaPipe (preferred)
-        self._face_detector_yunet = None   # YuNet fallback
-        self._eye_cascade = None           # Haar fallback for eyes
+        # Per-thread detectors (MediaPipe / YuNet / Haar are not thread-safe)
+        self._tls = threading.local()
+        self._landmarkers_lock = threading.Lock()
+        self._all_landmarkers = []  # track for cleanup
 
     def stop(self):
         self._stop = True
@@ -87,9 +89,10 @@ class QAAnalysisWorker(QThread):
 
     # -- face + eyes (MediaPipe) --------------------------------------------
     def _get_face_landmarker(self):
-        """Lazy-init MediaPipe FaceLandmarker with blendshapes for eye-blink."""
-        if self._face_landmarker is not None:
-            return self._face_landmarker
+        """Lazy-init a per-thread MediaPipe FaceLandmarker with blendshapes."""
+        landmarker = getattr(self._tls, "face_landmarker", None)
+        if landmarker is not None:
+            return landmarker
         if not _HAS_MEDIAPIPE:
             return None
         model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "_")
@@ -108,11 +111,14 @@ class QAAnalysisWorker(QThread):
                 output_face_blendshapes=True,
                 min_face_detection_confidence=0.5,
             )
-            self._face_landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(options)
+            landmarker = mp.tasks.vision.FaceLandmarker.create_from_options(options)
+            self._tls.face_landmarker = landmarker
+            with self._landmarkers_lock:
+                self._all_landmarkers.append(landmarker)
         except Exception as e:
             self.log_msg.emit(f"Failed to create MediaPipe FaceLandmarker: {e}")
             return None
-        return self._face_landmarker
+        return landmarker
 
     def analyze_faces_and_eyes(self, cv_img):
         """Detect faces and eye-blink state in one pass.
@@ -158,7 +164,8 @@ class QAAnalysisWorker(QThread):
 
     def _detect_faces_yunet(self, cv_img):
         h, w = cv_img.shape[:2]
-        if self._face_detector_yunet is None:
+        detector = getattr(self._tls, "yunet_detector", None)
+        if detector is None:
             model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "_", "face_detection_yunet_2023mar.onnx")
             if not os.path.exists(model_path):
                 self._download_model(
@@ -166,16 +173,19 @@ class QAAnalysisWorker(QThread):
                     model_path)
             if not os.path.exists(model_path):
                 return []
-            self._face_detector_yunet = cv2.FaceDetectorYN.create(model_path, "", (w, h), 0.7, 0.3, 5000)
-        self._face_detector_yunet.setInputSize((w, h))
-        _, faces = self._face_detector_yunet.detect(cv_img)
+            detector = cv2.FaceDetectorYN.create(model_path, "", (w, h), 0.7, 0.3, 5000)
+            self._tls.yunet_detector = detector
+        detector.setInputSize((w, h))
+        _, faces = detector.detect(cv_img)
         return faces if faces is not None else []
 
     def _eyes_closed_haar(self, cv_gray, face_bbox):
         """Fallback: returns True if eyes appear closed using Haar cascades."""
         try:
-            if self._eye_cascade is None:
-                self._eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+            eye_cascade = getattr(self._tls, "eye_cascade", None)
+            if eye_cascade is None:
+                eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+                self._tls.eye_cascade = eye_cascade
             img_h, img_w = cv_gray.shape[:2]
             if len(face_bbox) >= 8:
                 fw = int(face_bbox[2])
@@ -189,7 +199,7 @@ class QAAnalysisWorker(QThread):
                     if patch.size == 0:
                         continue
                     min_sz = max(int(eye_radius * 0.4), 5)
-                    if len(self._eye_cascade.detectMultiScale(patch, 1.05, 3, minSize=(min_sz, min_sz))) > 0:
+                    if len(eye_cascade.detectMultiScale(patch, 1.05, 3, minSize=(min_sz, min_sz))) > 0:
                         eyes_found += 1
                 return eyes_found < 2
             elif len(face_bbox) >= 4:
@@ -198,7 +208,7 @@ class QAAnalysisWorker(QThread):
                 if region.size == 0:
                     return True
                 min_sz = max(int(w * 0.06), 5)
-                return len(self._eye_cascade.detectMultiScale(region, 1.05, 3, minSize=(min_sz, min_sz))) < 2
+                return len(eye_cascade.detectMultiScale(region, 1.05, 3, minSize=(min_sz, min_sz))) < 2
         except Exception:
             pass
         return False
@@ -211,9 +221,9 @@ class QAAnalysisWorker(QThread):
         except Exception:
             pass
 
-    # -- main run -----------------------------------------------------------
-    def run(self):
-        total = len(self.image_files)
+    # -- per-image analysis (called from thread pool) ------------------------
+    def _analyze_single(self, img_path):
+        """Analyze a single image. Thread-safe via thread-local detectors."""
         blur_enabled = self.settings.get("blur_enabled", True)
         res_enabled = self.settings.get("resolution_enabled", True)
         mask_enabled = self.settings.get("mask_enabled", True)
@@ -223,69 +233,84 @@ class QAAnalysisWorker(QThread):
         blur_low = self.settings.get("blur_threshold_low", 50)
         blur_high = self.settings.get("blur_threshold_high", 500)
 
-        for i, img_path in enumerate(self.image_files):
-            if self._stop:
-                break
-            self.progress.emit(i, total)
+        result = {
+            "filepath": img_path,
+            "blur_variance": 0.0, "blur_score": 1.0,
+            "width": 0, "height": 0, "min_dimension": 0, "resolution_score": 1.0,
+            "has_mask": False, "mask_score": 1.0,
+            "face_count": 0, "face_score": 1.0,
+            "eyes_closed_count": 0, "eyes_score": 1.0,
+        }
 
-            result = {
-                "filepath": img_path,
-                "blur_variance": 0.0, "blur_score": 1.0,
-                "width": 0, "height": 0, "min_dimension": 0, "resolution_score": 1.0,
-                "has_mask": False, "mask_score": 1.0,
-                "face_count": 0, "face_score": 1.0,
-                "eyes_closed_count": 0, "eyes_score": 1.0,
-            }
+        try:
+            pil_img = Image.open(img_path)
+            pil_img = ImageOps.exif_transpose(pil_img)
+            cv_img = np.array(pil_img.convert("RGB"))
+            h, w = cv_img.shape[:2]
+            result["width"] = w
+            result["height"] = h
+            result["min_dimension"] = min(w, h)
 
+            cv_gray = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
+
+            if blur_enabled:
+                variance = self.analyze_blur(cv_gray)
+                result["blur_variance"] = round(variance, 2)
+                if blur_high > blur_low:
+                    result["blur_score"] = round(max(0.0, min(1.0, (variance - blur_low) / (blur_high - blur_low))), 4)
+                else:
+                    result["blur_score"] = 1.0 if variance >= blur_low else 0.0
+
+            if res_enabled:
+                result["resolution_score"] = round(self.analyze_resolution(w, h, res_threshold), 4)
+
+            if mask_enabled:
+                has_mask = self.check_mask_exists(img_path, self.folder)
+                result["has_mask"] = has_mask
+                result["mask_score"] = 1.0 if has_mask else 0.0
+
+            if face_enabled:
+                face_count, eyes_closed = self.analyze_faces_and_eyes(cv_img)
+                result["face_count"] = face_count
+                if eyes_enabled and face_count > 0:
+                    result["eyes_closed_count"] = eyes_closed
+                    result["eyes_score"] = 0.0 if eyes_closed > 0 else 1.0
+
+        except Exception as e:
+            self.log_msg.emit(f"Error analyzing {os.path.basename(img_path)}: {e}")
+
+        return img_path, result
+
+    # -- main run -----------------------------------------------------------
+    def run(self):
+        total = len(self.image_files)
+        num_workers = min(os.cpu_count() or 4, 8)
+        completed = 0
+
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = {executor.submit(self._analyze_single, p): p for p in self.image_files}
+
+            for future in as_completed(futures):
+                if self._stop:
+                    for f in futures:
+                        f.cancel()
+                    break
+                completed += 1
+                self.progress.emit(completed, total)
+                try:
+                    img_path, result = future.result()
+                    self.result_ready.emit(img_path, result)
+                except Exception as e:
+                    img_path = futures[future]
+                    self.log_msg.emit(f"Error analyzing {os.path.basename(img_path)}: {e}")
+
+        # Cleanup all per-thread MediaPipe landmarkers
+        for lm in self._all_landmarkers:
             try:
-                # Load image
-                pil_img = Image.open(img_path)
-                pil_img = ImageOps.exif_transpose(pil_img)
-                cv_img = np.array(pil_img.convert("RGB"))
-                h, w = cv_img.shape[:2]
-                result["width"] = w
-                result["height"] = h
-                result["min_dimension"] = min(w, h)
-
-                cv_gray = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
-
-                # Blur
-                if blur_enabled:
-                    variance = self.analyze_blur(cv_gray)
-                    result["blur_variance"] = round(variance, 2)
-                    if blur_high > blur_low:
-                        result["blur_score"] = round(max(0.0, min(1.0, (variance - blur_low) / (blur_high - blur_low))), 4)
-                    else:
-                        result["blur_score"] = 1.0 if variance >= blur_low else 0.0
-
-                # Resolution
-                if res_enabled:
-                    result["resolution_score"] = round(self.analyze_resolution(w, h, res_threshold), 4)
-
-                # Mask
-                if mask_enabled:
-                    has_mask = self.check_mask_exists(img_path, self.folder)
-                    result["has_mask"] = has_mask
-                    result["mask_score"] = 1.0 if has_mask else 0.0
-
-                # Face + Eyes (unified via MediaPipe or fallback)
-                if face_enabled:
-                    face_count, eyes_closed = self.analyze_faces_and_eyes(cv_img)
-                    result["face_count"] = face_count
-
-                    if eyes_enabled and face_count > 0:
-                        result["eyes_closed_count"] = eyes_closed
-                        result["eyes_score"] = 0.0 if eyes_closed > 0 else 1.0
-
-            except Exception as e:
-                self.log_msg.emit(f"Error analyzing {os.path.basename(img_path)}: {e}")
-
-            self.result_ready.emit(img_path, result)
-
-        # Cleanup MediaPipe resources
-        if self._face_landmarker is not None:
-            self._face_landmarker.close()
-            self._face_landmarker = None
+                lm.close()
+            except Exception:
+                pass
+        self._all_landmarkers.clear()
 
         self.progress.emit(total, total)
         self.finished_analysis.emit()
@@ -1064,25 +1089,34 @@ class QATab(QWidget):
         self.log_msg.emit(f"Appended to {os.path.basename(txt_path)}")
 
     def move_current_to_unused(self):
-        f_path = self._filepath_from_item(self.tree_widget.currentItem())
+        item = self.tree_widget.currentItem()
+        f_path = self._filepath_from_item(item)
         if not f_path:
             return
         visual_idx = self._current_visual_index()
         self._move_to_unused(f_path)
-        # Remove from lists and refresh
+        # Remove from data lists
         if f_path in self.sorted_files:
             self.sorted_files.remove(f_path)
         if f_path in self.image_files:
             self.image_files.remove(f_path)
         if f_path in self.analysis_results:
             del self.analysis_results[f_path]
-        self._rebuild_list_widget()
-        # Select next logical item
+        # Remove just the single tree item instead of rebuilding everything
+        self.tree_widget.blockSignals(True)
+        self.tree_widget.takeTopLevelItem(visual_idx)
         count = self.tree_widget.topLevelItemCount()
+        self.slider.setRange(0, max(0, count - 1))
+        # Advance to next image (or last if we were at the end) for triage flow
         if count > 0:
             new_idx = min(visual_idx, count - 1)
-            self.tree_widget.setCurrentItem(self.tree_widget.topLevelItem(new_idx))
+            new_item = self.tree_widget.topLevelItem(new_idx)
+            self.tree_widget.setCurrentItem(new_item)
+            self.tree_widget.blockSignals(False)
+            # Explicitly refresh since setCurrentItem may not fire the signal
+            self._on_tree_item_changed(new_item, None)
         else:
+            self.tree_widget.blockSignals(False)
             self.lbl_image.set_image(None)
             self.txt_caption.setPlainText("")
             self.lbl_info.setText("0 / 0")
