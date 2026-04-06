@@ -57,6 +57,7 @@ warnings.filterwarnings("ignore", message=".*fast processor by default.*")
 warnings.filterwarnings("ignore", message=".*max_length is ignored.*")
 warnings.filterwarnings("ignore", message=".*The following generation flags are not valid.*")
 logging.getLogger("transformers.generation.utils").setLevel(logging.ERROR)
+logging.getLogger("transformers.generation.configuration_utils").setLevel(logging.ERROR)
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
 class StopTrigger(StoppingCriteria):

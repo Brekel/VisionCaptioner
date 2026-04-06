@@ -82,17 +82,19 @@ class TestWorker(QThread):
 
         target_pair = pairs[0] if self.mode == "first" else random.choice(pairs)
         target_file, mask_file = target_pair
-        
+
         self.log_signal.emit(f"Test Target: {os.path.basename(target_file)}")
+
+        use_masks = self.settings.get('use_masks', True)
 
         try:
             start_t = time.time()
             captions = self.engine.generate_batch(
-                [target_file], 
-                self.settings['prompt'], 
-                self.settings['trigger'], 
-                frame_count=self.settings['frame_count'], 
-                mask_paths=[mask_file], 
+                [target_file],
+                self.settings['prompt'],
+                self.settings['trigger'],
+                frame_count=self.settings['frame_count'],
+                mask_paths=[mask_file] if use_masks else [None],
                 max_tokens=self.settings['max_tokens'],
                 log_callback=lambda m: self.log_signal.emit(m),
                 stop_event=self.isInterruptionRequested
@@ -150,13 +152,14 @@ class CaptionWorker(QThread):
             skipped = 0
             
             # Filter skip/process
+            use_masks = self.settings.get('use_masks', True)
             for fpath, maskpath in batch:
                 txt_path = os.path.splitext(fpath)[0] + ".txt"
                 if self.settings['skip_existing'] and os.path.exists(txt_path):
                     skipped += 1
                 else:
                     files.append(fpath)
-                    masks.append(maskpath)
+                    masks.append(maskpath if use_masks else None)
 
             # 1. Handle SKIPPED files
             if skipped > 0:

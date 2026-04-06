@@ -594,8 +594,8 @@ class QATab(QWidget):
         self.btn_append_single = QPushButton("Append to Caption [A]")
         self.btn_append_single.setToolTip("Append the configured text to this image's caption file (A)")
         self.btn_append_single.clicked.connect(self.append_to_current_caption)
-        self.btn_move_single = QPushButton("Move to Unused [D]")
-        self.btn_move_single.setToolTip("Move this image (and its caption/mask) to the unused folder (D)")
+        self.btn_move_single = QPushButton("Move to Unused [Del]")
+        self.btn_move_single.setToolTip("Move this image (and its caption/mask) to the unused folder (Del)")
         self.btn_move_single.clicked.connect(self.move_current_to_unused)
         action_layout.addWidget(self.btn_append_single)
         action_layout.addWidget(self.btn_move_single)
@@ -671,7 +671,7 @@ class QATab(QWidget):
         QShortcut(QKeySequence(Qt.Key_Left), self, self.navigate_prev)
         QShortcut(QKeySequence(Qt.Key_Right), self, self.navigate_next)
         QShortcut(QKeySequence(Qt.Key_A), self, self.append_to_current_caption)
-        QShortcut(QKeySequence(Qt.Key_D), self, self.move_current_to_unused)
+        QShortcut(QKeySequence(Qt.Key_Delete), self, self.move_current_to_unused)
 
     # -----------------------------------------------------------------------
     # Folder / File Discovery

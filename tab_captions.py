@@ -144,6 +144,11 @@ class CaptionsTab(QWidget):
         self.chk_skip.setToolTip("If checked, files that already have a corresponding .txt caption file will be ignored.")
         left_layout.addWidget(self.chk_skip)
 
+        self.chk_use_masks = QCheckBox("Use masks (if available)")
+        self.chk_use_masks.setChecked(True)
+        self.chk_use_masks.setToolTip("If checked, mask files (e.g. masklabel) will be applied to images before captioning.\nUncheck to always caption the full image.")
+        left_layout.addWidget(self.chk_use_masks)
+
         left_layout.addSpacing(10)
         left_layout.addWidget(QLabel("Trigger Word (Optional):"))
         self.txt_trigger = QLineEdit()
@@ -403,6 +408,7 @@ class CaptionsTab(QWidget):
             "frames": self.spin_frames.value(),
             "tokens": self.spin_tokens.value(),
             "skip_existing": self.chk_skip.isChecked(),
+            "use_masks": self.chk_use_masks.isChecked(),
             "trigger": self.txt_trigger.text(),
             "system_prompt_idx": self.combo_prompts.currentIndex(),
             "prompt_text": self.txt_prompt.toPlainText(),
@@ -434,6 +440,7 @@ class CaptionsTab(QWidget):
         if "frames" in settings: self.spin_frames.setValue(settings["frames"])
         if "tokens" in settings: self.spin_tokens.setValue(settings["tokens"])
         if "skip_existing" in settings: self.chk_skip.setChecked(settings["skip_existing"])
+        if "use_masks" in settings: self.chk_use_masks.setChecked(settings["use_masks"])
         if "trigger" in settings: self.txt_trigger.setText(settings["trigger"])
         if "suffix" in settings: self.txt_suffix.setPlainText(settings["suffix"])
         
@@ -532,7 +539,7 @@ class CaptionsTab(QWidget):
         self.btn_unload.setEnabled(False) 
         
         p = self.txt_prompt.toPlainText() + "\n" + self.txt_suffix.toPlainText()
-        settings = {"frame_count": self.spin_frames.value(), "max_tokens": self.spin_tokens.value(), "prompt": p, "trigger": self.txt_trigger.text()}
+        settings = {"frame_count": self.spin_frames.value(), "max_tokens": self.spin_tokens.value(), "prompt": p, "trigger": self.txt_trigger.text(), "use_masks": self.chk_use_masks.isChecked()}
 
         self.lbl_status.setText("Testing..." if mode == "random" else "Testing First Image...")
 
@@ -573,7 +580,7 @@ class CaptionsTab(QWidget):
         settings = {
             "batch_size": self.spin_batch.value(), "skip_existing": self.chk_skip.isChecked(),
             "frame_count": self.spin_frames.value(), "max_tokens": self.spin_tokens.value(),
-            "prompt": p, "trigger": self.txt_trigger.text()
+            "prompt": p, "trigger": self.txt_trigger.text(), "use_masks": self.chk_use_masks.isChecked()
         }
 
         self.worker = CaptionWorker(self.engine, self.current_folder, settings)
