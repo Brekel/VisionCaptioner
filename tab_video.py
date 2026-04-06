@@ -453,8 +453,9 @@ class VideoTab(QWidget):
         super().__init__()
         self.sam_engine = sam_engine
         self.video_path = ""
-        self.current_folder = "" 
-        
+        self.current_folder = ""
+        self.recursive = False
+
         self.total_frames = 0
         self.fps = 30.0
         
@@ -764,8 +765,13 @@ class VideoTab(QWidget):
             if "end_frame" in s: self.spin_end.setValue(s["end_frame"])  
             self.update_scan_estimate()
 
-    def update_folder(self, folder):
+    def set_recursive(self, recursive):
+        self.recursive = recursive
+
+    def update_folder(self, folder, recursive=None):
         self.current_folder = folder
+        if recursive is not None:
+            self.recursive = recursive
 
     def open_video(self):
         start_dir = os.path.dirname(self.video_path) if self.video_path else ""

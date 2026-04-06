@@ -17,7 +17,14 @@
       "Bash(python -c \"import mediapipe; print\\(''mediapipe'', mediapipe.__version__\\)\")",
       "Bash(venv/Scripts/pip install:*)",
       "Bash(grep -n \"settings.json\\\\|SETTINGS_FILE\" \"e:/_python_tools/VisionCaptioner/\"*.py)",
-      "Bash(grep -n \"splitterMoved\\\\|resizeEvent\\\\|showEvent\" \"e:/_python_tools/VisionCaptioner/\"*.py)"
+      "Bash(grep -n \"splitterMoved\\\\|resizeEvent\\\\|showEvent\" \"e:/_python_tools/VisionCaptioner/\"*.py)",
+      "Bash(python3 -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(\"e:/_python_tools/VisionCaptioner/venv/Scripts/python.exe\" -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(wc -l \"e:\\\\_python_tools\\\\VisionCaptioner\"/*.py)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/ -v)",
+      "Bash(./venv/Scripts/pip.exe install:*)",
+      "Bash(pip install:*)"
     ]
   }
 }

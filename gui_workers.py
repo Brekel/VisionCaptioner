@@ -75,7 +75,8 @@ class TestWorker(QThread):
         self.mode = mode
 
     def run(self):
-        pairs = self.engine.find_files(self.image_folder, skip_existing=False)
+        recursive = self.settings.get('recursive', False)
+        pairs = self.engine.find_files(self.image_folder, skip_existing=False, recursive=recursive)
         if not pairs:
             self.error.emit("No images found.")
             return
@@ -118,7 +119,8 @@ class CaptionWorker(QThread):
         self.is_running = True
 
     def run(self):
-        all_pairs = self.engine.find_files(self.image_folder, skip_existing=False)
+        recursive = self.settings.get('recursive', False)
+        all_pairs = self.engine.find_files(self.image_folder, skip_existing=False, recursive=recursive)
         total = len(all_pairs)
         self.signals.total.emit(total)
         self.signals.log.emit(f"Found {total} files.")

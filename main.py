@@ -101,6 +101,11 @@ class MainWindow(QMainWindow):
         self.chk_sound.setToolTip("Play sound when processing finishes")
         self.chk_sound.setChecked(True)
 
+        self.chk_recursive = QCheckBox("Include subfolders")
+        self.chk_recursive.setToolTip("Recursively scan subdirectories for images and videos")
+        self.chk_recursive.setChecked(False)
+        self.chk_recursive.stateChanged.connect(self.on_recursive_changed)
+
         # Initialize Sound Effect
         self.sound_player = QSoundEffect()
         # Ensure you have a 'notification.wav' in your folder
@@ -111,6 +116,7 @@ class MainWindow(QMainWindow):
         top_bar.addWidget(self.txt_folder)
         top_bar.addWidget(self.btn_browse)
         top_bar.addWidget(self.btn_open_folder)
+        top_bar.addWidget(self.chk_recursive)
         top_bar.addWidget(self.chk_sound)
         layout.addLayout(top_bar)
 
@@ -233,11 +239,20 @@ class MainWindow(QMainWindow):
 
     def on_folder_changed(self, text):
         if os.path.exists(text):
-            self.tab_gen.update_folder(text)
-            self.tab_rev.update_folder(text)
-            self.tab_mask.update_folder(text)
-            self.tab_video.update_folder(text)
-            self.tab_qa.update_folder(text)
+            recursive = self.chk_recursive.isChecked()
+            self.tab_gen.update_folder(text, recursive)
+            self.tab_rev.update_folder(text, recursive)
+            self.tab_mask.update_folder(text, recursive)
+            self.tab_video.update_folder(text, recursive)
+            self.tab_qa.update_folder(text, recursive)
+
+    def on_recursive_changed(self, state):
+        recursive = self.chk_recursive.isChecked()
+        self.tab_gen.set_recursive(recursive)
+        self.tab_rev.set_recursive(recursive)
+        self.tab_mask.set_recursive(recursive)
+        self.tab_video.set_recursive(recursive)
+        self.tab_qa.set_recursive(recursive)
 
     def on_tab_changed(self, index):
         current_tab = self.tabs.widget(index)
@@ -301,7 +316,8 @@ class MainWindow(QMainWindow):
             self.sound_player.play()
 
     def save_settings(self):
-        data = { "folder": self.txt_folder.text(), "geometry": self.saveGeometry().toHex().data().decode(),
+        data = { "folder": self.txt_folder.text(), "recursive": self.chk_recursive.isChecked(),
+                 "geometry": self.saveGeometry().toHex().data().decode(),
                  "main_splitter_state": self.main_splitter.saveState().toHex().data().decode(),
                  "generate_tab": self.tab_gen.get_settings(), "review_tab": self.tab_rev.get_settings(),
                  "mask_tab": self.tab_mask.get_settings(), "video_tab": self.tab_video.get_settings(),
@@ -316,6 +332,7 @@ class MainWindow(QMainWindow):
                 with open(SETTINGS_FILE, 'r') as f: data = json.load(f)
                 if "geometry" in data: self.restoreGeometry(QByteArray.fromHex(data["geometry"].encode()))
                 if "main_splitter_state" in data: self.main_splitter.restoreState(QByteArray.fromHex(data["main_splitter_state"].encode()))
+                if "recursive" in data: self.chk_recursive.setChecked(data["recursive"])
                 if "folder" in data: self.txt_folder.setText(data["folder"])
                 if "generate_tab" in data: self.tab_gen.set_settings(data["generate_tab"])
                 if "review_tab" in data: self.tab_rev.set_settings(data["review_tab"])

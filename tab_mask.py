@@ -1,8 +1,8 @@
 import os
-import glob
 import time
 import datetime
 import shutil
+from file_utils import find_media_files, IMAGE_EXTS
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                                QLineEdit, QProgressBar, QGroupBox, QMessageBox,
                                QSplitter, QApplication, QCheckBox, QSpinBox, QDoubleSpinBox,
@@ -237,6 +237,7 @@ class MaskTab(QWidget):
         else:
             self.sam_engine = SAM3Engine()
         self.current_folder = ""
+        self.recursive = False
         self.worker = None
         self.loader_worker = None
         
@@ -492,8 +493,13 @@ class MaskTab(QWidget):
         self.worker.finished.connect(self.on_worker_finished)
         self.worker.start()
 
-    def update_folder(self, folder):
+    def set_recursive(self, recursive):
+        self.recursive = recursive
+
+    def update_folder(self, folder, recursive=None):
         self.current_folder = folder
+        if recursive is not None:
+            self.recursive = recursive
 
     def start_generation(self):
         # 1. Validation Logic
@@ -507,14 +513,8 @@ class MaskTab(QWidget):
             return
 
         # 2. Prepare Files List
-        files = []
-        exts = ['*.jpg', '*.jpeg', '*.png', '*.webp', '*.bmp']
-        for ext in exts:
-            files.extend(glob.glob(os.path.join(self.current_folder, ext)))
-            files.extend(glob.glob(os.path.join(self.current_folder, ext.upper())))
-        
-        files = [f for f in files if "masklabel" not in os.path.basename(f).lower()]
-        files = sorted(list(set(files)))
+        files = find_media_files(self.current_folder, exts=IMAGE_EXTS,
+                                 recursive=self.recursive)
         
         if not files:
             self.log_msg.emit("No images found to process.")

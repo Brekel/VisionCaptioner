@@ -1,8 +1,8 @@
 import os
 import base64
 import io
-import glob
 import torch
+from file_utils import find_media_files, IMAGE_EXTS, VIDEO_EXTS
 from transformers import AutoModelForImageTextToText, AutoProcessor, StoppingCriteria, StoppingCriteriaList
 from qwen_vl_utils import process_vision_info
 import gc
@@ -85,16 +85,9 @@ class QwenEngine:
             return "mps"
         return "cpu"
 
-    def find_files(self, folder_path, skip_existing=False):
-        image_exts = ['*.jpg', '*.jpeg', '*.png', '*.webp', '*.bmp']
-        video_exts = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.webm']
-        
-        files = []
-        for ext in (image_exts + video_exts):
-            files.extend(glob.glob(os.path.join(folder_path, ext)))
-            files.extend(glob.glob(os.path.join(folder_path, ext.upper())))
-        
-        files = sorted(list(set(files)))
+    def find_files(self, folder_path, skip_existing=False, recursive=False):
+        files = find_media_files(folder_path, exts=IMAGE_EXTS + VIDEO_EXTS,
+                                 recursive=recursive, exclude_masks=False)
         
         mask_suffix = "masklabel"
         results = []

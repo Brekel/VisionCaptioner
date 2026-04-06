@@ -6,6 +6,7 @@ import json
 import shutil
 import numpy as np
 from PIL import Image, ImageOps
+from file_utils import find_media_files, get_display_name, ALL_MEDIA_EXTS
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QTextEdit, QSlider, QLabel, QSplitter, QGroupBox, 
                                QLineEdit, QCheckBox, QPushButton, QMessageBox, QFormLayout, QFrame, QSizePolicy, QColorDialog, QButtonGroup, QProgressDialog, QComboBox)
 from PySide6.QtCore import Qt, QTimer, Signal, QByteArray, QCoreApplication
@@ -60,6 +61,7 @@ class ReviewTab(QWidget):
     def __init__(self):
         super().__init__()
         self.current_folder = ""
+        self.recursive = False
         self.image_files = []
         self.current_index = -1
         self.last_selected_file = None
@@ -456,7 +458,7 @@ class ReviewTab(QWidget):
         # Get current filename safely
         current_file = None
         if 0 <= self.current_index < len(self.image_files):
-            current_file = os.path.basename(self.image_files[self.current_index])
+            current_file = get_display_name(self.image_files[self.current_index], self.current_folder, self.recursive)
         
         return {
             "find_text": self.txt_find.text(), 
@@ -1219,12 +1221,18 @@ class ReviewTab(QWidget):
     def _update_color_button_style(self):
         self.btn_color_picker.setStyleSheet(f"background-color: {self.mask_overlay_color.name()}; border: 1px solid #888;")
 
-    def update_folder(self, folder):
+    def set_recursive(self, recursive):
+        self.recursive = recursive
+        self.refresh_file_list()
+
+    def update_folder(self, folder, recursive=None):
         if self.video_cap is not None:
             self.video_cap.release()
             self.video_cap = None
-            
+
         self.current_folder = folder
+        if recursive is not None:
+            self.recursive = recursive
         self.mask_is_dirty = False
         self.undo_snapshot = {}
         self.btn_undo.setEnabled(False)
@@ -1233,9 +1241,9 @@ class ReviewTab(QWidget):
     def update_stats(self):
         if not self.current_folder: return
         num_images = len(self.image_files)
-        num_txts = len(glob.glob(os.path.join(self.current_folder, "*.txt")))
+        num_txts = sum(1 for f in self.image_files if os.path.exists(os.path.splitext(f)[0] + ".txt"))
         try:
-            num_masks = sum(1 for f in os.listdir(self.current_folder) if f.lower().endswith("-masklabel.png"))
+            num_masks = sum(1 for f in self.image_files if os.path.exists(os.path.splitext(f)[0] + "-masklabel.png"))
         except:
             num_masks = 0
             
@@ -1255,35 +1263,29 @@ class ReviewTab(QWidget):
         if not self.current_folder:
             self.list_widget.clear()
             return
-            
+
         # Prioritize internal index state, then UI selection
         current_selection = None
         if 0 <= self.current_index < len(self.image_files):
-             current_selection = os.path.basename(self.image_files[self.current_index])
+             current_selection = get_display_name(self.image_files[self.current_index], self.current_folder, self.recursive)
         elif self.list_widget.currentItem():
              current_selection = self.list_widget.currentItem().text()
         self.list_widget.clear()
         self.image_files = []
-        
-        exts = ['*.jpg', '*.jpeg', '*.png', '*.webp', '*.bmp', '*.mp4', '*.mkv', '*.avi', '*.mov', '*.webm']
-        files = []
-        for ext in exts:
-            files.extend(glob.glob(os.path.join(self.current_folder, ext)))
-            files.extend(glob.glob(os.path.join(self.current_folder, ext.upper())))
-            
-        unique_files = sorted(list(set(files)))
-        self.image_files = [f for f in unique_files if not f.lower().endswith("-masklabel.png")]
-        
+
+        self.image_files = find_media_files(self.current_folder, exts=ALL_MEDIA_EXTS,
+                                            recursive=self.recursive)
+
         for f in self.image_files:
-            self.list_widget.addItem(os.path.basename(f))
-            
+            self.list_widget.addItem(get_display_name(f, self.current_folder, self.recursive))
+
         self.slider.setRange(0, max(0, len(self.image_files) - 1))
         self.update_stats()
-        
+
         if self.image_files:
             # Determine which file to select, prioritizing the one from settings on startup
             file_to_select = self.last_selected_file or current_selection
-            
+
             if file_to_select:
                 items = self.list_widget.findItems(file_to_select, Qt.MatchExactly)
                 if items:
@@ -1291,7 +1293,7 @@ class ReviewTab(QWidget):
                     # We've used the setting, clear it so it doesn't get re-used on subsequent refreshes
                     self.last_selected_file = None
                     return
-            
+
             # If nothing was selected or found, default to the first item
             self.list_widget.setCurrentRow(0)
             self.last_selected_file = None # Also clear if the file wasn't found
@@ -1321,13 +1323,13 @@ class ReviewTab(QWidget):
         self.load_image_data(self.image_files[row])
         
         # Update Info Label with Resolution
-        filename = os.path.basename(self.image_files[row])
+        display_name = get_display_name(self.image_files[row], self.current_folder, self.recursive)
         res_info = ""
         if self.cv_img_original is not None:
              h, w = self.cv_img_original.shape[:2]
              res_info = f"    |    {w} x {h}"
-             
-        self.lbl_info.setText(f"{row + 1} / {len(self.image_files)}    |    {filename}{res_info}")
+
+        self.lbl_info.setText(f"{row + 1} / {len(self.image_files)}    |    {display_name}{res_info}")
         self.update_image_display()
         self.load_caption(row)
         self._update_brush_cursor_size()

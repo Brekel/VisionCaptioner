@@ -26,6 +26,7 @@ class CaptionsTab(QWidget):
         self.test_worker = None
         self.loader_worker = None
         self.current_folder = ""
+        self.recursive = False
         self.PROMPTS_DIR = "prompts"
         self.start_time = 0.0
 
@@ -306,8 +307,13 @@ class CaptionsTab(QWidget):
         dlg.exec() # Modal blocking
         self.populate_models() # Refresh list after close
 
-    def update_folder(self, folder):
+    def update_folder(self, folder, recursive=None):
         self.current_folder = folder
+        if recursive is not None:
+            self.recursive = recursive
+
+    def set_recursive(self, recursive):
+        self.recursive = recursive
 
     def get_btn_style(self, color_type):
         base_css = """
@@ -539,7 +545,7 @@ class CaptionsTab(QWidget):
         self.btn_unload.setEnabled(False) 
         
         p = self.txt_prompt.toPlainText() + "\n" + self.txt_suffix.toPlainText()
-        settings = {"frame_count": self.spin_frames.value(), "max_tokens": self.spin_tokens.value(), "prompt": p, "trigger": self.txt_trigger.text(), "use_masks": self.chk_use_masks.isChecked()}
+        settings = {"frame_count": self.spin_frames.value(), "max_tokens": self.spin_tokens.value(), "prompt": p, "trigger": self.txt_trigger.text(), "use_masks": self.chk_use_masks.isChecked(), "recursive": self.recursive}
 
         self.lbl_status.setText("Testing..." if mode == "random" else "Testing First Image...")
 
@@ -580,7 +586,8 @@ class CaptionsTab(QWidget):
         settings = {
             "batch_size": self.spin_batch.value(), "skip_existing": self.chk_skip.isChecked(),
             "frame_count": self.spin_frames.value(), "max_tokens": self.spin_tokens.value(),
-            "prompt": p, "trigger": self.txt_trigger.text(), "use_masks": self.chk_use_masks.isChecked()
+            "prompt": p, "trigger": self.txt_trigger.text(), "use_masks": self.chk_use_masks.isChecked(),
+            "recursive": self.recursive
         }
 
         self.worker = CaptionWorker(self.engine, self.current_folder, settings)

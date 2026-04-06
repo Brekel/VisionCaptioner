@@ -1,13 +1,13 @@
 import os
 import argparse
 import json
-import glob
 import sys
 import cv2 # Added for video processing
 import numpy as np # Added for array handling
 from tqdm import tqdm
 from backend import QwenEngine, SAM3Engine
 from PIL import Image, ImageOps
+from file_utils import find_media_files, IMAGE_EXTS, VIDEO_EXTS
 
 SETTINGS_FILE = "settings.json"
 
@@ -94,29 +94,16 @@ def get_model_path_from_index(index):
         return os.path.join(base_path, models[index])
     return None
 
-def find_images_in_folder(folder):
+def find_images_in_folder(folder, recursive=False):
     """Helper to just get image files."""
-    exts = ['*.jpg', '*.jpeg', '*.png', '*.webp', '*.bmp']
-    files = []
-    for ext in exts:
-        files.extend(glob.glob(os.path.join(folder, ext)))
-        files.extend(glob.glob(os.path.join(folder, ext.upper())))
-    
-    clean_files = [f for f in sorted(list(set(files))) if "masklabel" not in os.path.basename(f).lower()]
-    return clean_files
+    return find_media_files(folder, exts=IMAGE_EXTS, recursive=recursive)
 
-def find_videos_in_folder(folder):
+def find_videos_in_folder(folder, recursive=False):
     """Helper to find video files."""
     # If the user passed a file path instead of a folder, return just that file
     if os.path.isfile(folder):
         return [folder]
-
-    exts = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.webm', '*.flv']
-    files = []
-    for ext in exts:
-        files.extend(glob.glob(os.path.join(folder, ext)))
-        files.extend(glob.glob(os.path.join(folder, ext.upper())))
-    return sorted(list(set(files)))
+    return find_media_files(folder, exts=VIDEO_EXTS, recursive=recursive)
 
 def main():
     defaults = load_defaults_from_settings()
@@ -128,6 +115,7 @@ def main():
     parser.add_argument("--output", type=str, default=None, help="Optional output folder for video extraction. Defaults to input folder.")
     parser.add_argument("--mode", type=str, default="caption", choices=["caption", "mask", "video"], help="Operation mode: 'caption' (Qwen), 'mask' (SAM3), or 'video' (Extract & Mask).")
     parser.add_argument("--skip-existing", action="store_true", help="Skip files that already have results.")
+    parser.add_argument("--recursive", "-r", action="store_true", help="Recursively scan subdirectories for images/videos.")
 
     # Captioning Config (Qwen)
     grp_cap = parser.add_argument_group("Captioning Arguments")
@@ -214,7 +202,7 @@ def main():
 
         engine = QwenEngine()
         print("🔍 Scanning folder...")
-        all_pairs = engine.find_files(args.folder, skip_existing=args.skip_existing)
+        all_pairs = engine.find_files(args.folder, skip_existing=args.skip_existing, recursive=args.recursive)
         
         if not all_pairs:
             print("❌ No files found (or all skipped).")
@@ -306,7 +294,7 @@ def main():
             print(f"❌ Model Load Failed: {msg}")
             return
         
-        all_files = find_images_in_folder(args.folder)
+        all_files = find_images_in_folder(args.folder, recursive=args.recursive)
         
         files_to_process = []
         skipped_count = 0
@@ -428,7 +416,7 @@ def main():
             return
 
         # 2. Find Videos
-        videos = find_videos_in_folder(args.folder)
+        videos = find_videos_in_folder(args.folder, recursive=args.recursive)
         if not videos:
             print("❌ No video files found.")
             sam_engine.unload()

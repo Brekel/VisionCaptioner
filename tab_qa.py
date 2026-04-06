@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
+from file_utils import find_media_files, get_display_name, IMAGE_EXTS
 
 try:
     import mediapipe as mp
@@ -347,6 +348,7 @@ class QATab(QWidget):
     def __init__(self):
         super().__init__()
         self.current_folder = ""
+        self.recursive = False
         self.image_files = []       # all images (unsorted)
         self.sorted_files = []      # sorted by score after analysis
         self.current_index = -1
@@ -676,9 +678,15 @@ class QATab(QWidget):
     # -----------------------------------------------------------------------
     # Folder / File Discovery
     # -----------------------------------------------------------------------
-    def update_folder(self, path):
+    def set_recursive(self, recursive):
+        self.recursive = recursive
+        self.refresh_file_list()
+
+    def update_folder(self, path, recursive=None):
         if path and os.path.isdir(path):
             self.current_folder = path
+            if recursive is not None:
+                self.recursive = recursive
             self.refresh_file_list()
             self.load_cache()
 
@@ -687,14 +695,8 @@ class QATab(QWidget):
             self.tree_widget.clear()
             return
 
-        exts = ['*.jpg', '*.jpeg', '*.png', '*.webp', '*.bmp']
-        files = []
-        for ext in exts:
-            files.extend(glob.glob(os.path.join(self.current_folder, ext)))
-            files.extend(glob.glob(os.path.join(self.current_folder, ext.upper())))
-
-        unique_files = sorted(set(files))
-        self.image_files = [f for f in unique_files if not f.lower().endswith("-masklabel.png")]
+        self.image_files = find_media_files(self.current_folder, exts=IMAGE_EXTS,
+                                            recursive=self.recursive)
         self.sorted_files = list(self.image_files)
 
         self._rebuild_list_widget()
@@ -705,9 +707,9 @@ class QATab(QWidget):
         self.tree_widget.clear()
 
         for f in self.sorted_files:
-            basename = os.path.basename(f)
+            display_name = get_display_name(f, self.current_folder, self.recursive)
             item = _ScoreTreeItem(self.tree_widget)
-            item.setText(0, basename)
+            item.setText(0, display_name)
             item.setData(0, Qt.UserRole, f)  # store full path
 
             if f in self.analysis_results:
@@ -1281,7 +1283,7 @@ class QATab(QWidget):
         current_file = None
         f_path = self._filepath_from_item(self.tree_widget.currentItem())
         if f_path:
-            current_file = os.path.basename(f_path)
+            current_file = get_display_name(f_path, self.current_folder, self.recursive)
         return {
             "blur_enabled": self.chk_blur.isChecked(),
             "blur_threshold_low": self.spin_blur_low.value(),
