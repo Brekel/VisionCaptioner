@@ -62,7 +62,7 @@ The "Max Resolution" setting is ignored for Gemma 4 — Gemma's processor handle
 
 ## **GGUF Models**
 
-Models in GGUF format are supported for the **Qwen-VL family only** (Gemma 4 GGUF is not yet supported — see below). GGUF support requires the `llama-cpp-python` package from [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python/releases).
+Models in GGUF format are supported for the **Qwen-VL** and **Gemma 4** families. GGUF support requires the `llama-cpp-python` package from [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python/releases).
 
 ### Automatic Install (recommended)
 When you try to load a GGUF model without `llama-cpp-python` installed, VisionCaptioner will offer to install it for you. It automatically detects your Python version, operating system, and CUDA version, then downloads and installs the matching wheel from GitHub. The log shows exactly which package was selected so you can verify the choice.
@@ -81,4 +81,4 @@ If you prefer to install manually:
 * Make sure you download the GGUF version of the model and don't forget the accompanying mmproj file.
 
 ### Gemma 4 GGUF
-Gemma 4 GGUF (e.g. from `unsloth/gemma-4-*-GGUF`) is **not yet supported**. The current versions of llama-cpp-python ship chat handlers for Gemma 3 but not Gemma 4 — the architectures differ enough that loading would produce garbage. Please use the HuggingFace folder versions of Gemma 4 instead. Support will be revisited once llama-cpp-python adds a Gemma 4 chat handler.
+Gemma 4 GGUF models (e.g. from `unsloth/gemma-4-*-GGUF`) are supported and require llama-cpp-python **v0.3.35 or newer** from [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python/releases). Older versions do not include the Gemma4ChatHandler and will show an error asking you to update. The Vision Token Budget setting does not apply to GGUF models — it is automatically greyed out. Thinking mode is handled internally by the chat handler.

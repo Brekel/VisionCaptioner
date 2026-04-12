@@ -29,6 +29,7 @@ except ImportError:
 # --- CHECK FOR LLAMA-CPP ---
 HAS_LLAMA = False
 Llava15ChatHandler = None
+Gemma4ChatHandler = None
 
 try:
     from llama_cpp import Llama
@@ -48,6 +49,12 @@ if HAS_LLAMA:
     # Attempt to import Qwen3 if available (newer llama-cpp-python)
     try:
         from llama_cpp.llama_chat_format import Qwen3VLChatHandler
+    except ImportError:
+        pass
+
+    # Attempt to import Gemma4 if available (llama-cpp-python v0.3.35+)
+    try:
+        from llama_cpp.llama_chat_format import Gemma4ChatHandler
     except ImportError:
         pass
 
@@ -179,8 +186,6 @@ class QwenEngine:
             
             # --- GGUF HANDLING ---
             if probe_info.get("format") == "gguf":
-                if probe_info.get("backend") == "gemma_gguf":
-                    return False, "Gemma 4 GGUF is not yet supported (llama-cpp-python has no Gemma4 chat handler). Please download the HuggingFace folder version instead."
                 if not HAS_LLAMA:
                     return False, "LLAMA_CPP_NOT_INSTALLED"
 
@@ -200,35 +205,52 @@ class QwenEngine:
                 chat_handler = None
                 mmproj_path = None
                 
+                backend_type = probe_info.get("backend", "")
+
                 if probe_info.get("unified_vision"):
                     print("✅ Probe detected Unified Vision Model.")
-                    # Unified models (like Qwen2-VL GGUF) usually take the model path itself as clip_model_path OR just work 
-                    # dependent on the specific binding. 
-                    # For Qwen2.5-VL in llama-cpp, we use Qwen25VLChatHandler.
-                    try:
-                        from llama_cpp.llama_chat_format import Qwen25VLChatHandler
-                        chat_handler = Qwen25VLChatHandler(clip_model_path=model_path, verbose=False)
+                    if backend_type == "gemma_gguf":
+                        if Gemma4ChatHandler is None:
+                            return False, (
+                                "Gemma 4 GGUF requires llama-cpp-python v0.3.35+ with Gemma4ChatHandler. "
+                                "Please update your llama-cpp-python installation."
+                            )
+                        chat_handler = Gemma4ChatHandler(clip_model_path=model_path, verbose=False)
                         mmproj_path = model_path
-                    except ImportError:
-                        print("⚠️ Qwen25VLChatHandler not found in llama_cpp.")
-                
+                    else:
+                        try:
+                            from llama_cpp.llama_chat_format import Qwen25VLChatHandler
+                            chat_handler = Qwen25VLChatHandler(clip_model_path=model_path, verbose=False)
+                            mmproj_path = model_path
+                        except ImportError:
+                            print("⚠️ Qwen25VLChatHandler not found in llama_cpp.")
+
                 elif probe_info.get("mmproj_detected"):
                     mmproj_path = probe_info["mmproj_detected"]
                     print(f"✅ Probe detected compatible projector: {os.path.basename(mmproj_path)}")
-                    
-                    try:
-                        # Heuristic: Try Qwen25 handlers first as standard
-                        from llama_cpp.llama_chat_format import Qwen25VLChatHandler
-                        chat_handler = Qwen25VLChatHandler(clip_model_path=mmproj_path, verbose=False)
-                    except:
-                        # Fallback for older/other models if needed
+
+                    if backend_type == "gemma_gguf":
+                        if Gemma4ChatHandler is None:
+                            return False, (
+                                "Gemma 4 GGUF requires llama-cpp-python v0.3.35+ with Gemma4ChatHandler. "
+                                "Please update your llama-cpp-python installation."
+                            )
+                        chat_handler = Gemma4ChatHandler(clip_model_path=mmproj_path, verbose=False)
+                    else:
                         try:
-                            from llama_cpp.llama_chat_format import Llava15ChatHandler
-                            chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path, verbose=False)
+                            from llama_cpp.llama_chat_format import Qwen25VLChatHandler
+                            chat_handler = Qwen25VLChatHandler(clip_model_path=mmproj_path, verbose=False)
                         except:
-                            pass
+                            try:
+                                from llama_cpp.llama_chat_format import Llava15ChatHandler
+                                chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path, verbose=False)
+                            except:
+                                pass
                 else:
-                    print("⚠️ Text-Only GGUF (No Vision detected).")
+                    model_base = os.path.splitext(os.path.basename(model_path))[0]
+                    print("⚠️ Text-Only GGUF — no built-in vision and no matching mmproj found.")
+                    print(f"   To enable vision, place an mmproj file next to the model and name it")
+                    print(f"   to share the model name, e.g.: {model_base}-mmproj-BF16.gguf")
 
                 # Load Llama
                 try:
@@ -242,7 +264,9 @@ class QwenEngine:
                     }
                     self.model = Llama(**llm_kwargs)
                     self.is_gguf = True
-                    
+                    self.family = get_family(probe_info, model_path)
+                    print(f"Model family: {self.family.name}")
+
                     msg = "GGUF Loaded ✅"
                     if chat_handler:
                         msg += " (Vision Enabled)"
@@ -489,8 +513,8 @@ class QwenEngine:
                     
                     text = output["choices"][0]["message"]["content"]
                     
-                    # Format Output
-                    clean = text.strip()
+                    # Format Output (family.clean_output strips thinking tokens / turn markers for Gemma)
+                    clean = self.family.clean_output(self.processor, text).strip()
                     if trigger_word and trigger_word.strip():
                         clean = f"{trigger_word.strip()}, {clean}"
                     results.append(clean)
@@ -506,7 +530,12 @@ class QwenEngine:
                     print(f"GGUF Error on {f_path}: {err_msg}")
                     
                     if "mtmd" in err_msg or "multimodal" in err_msg.lower():
-                        results.append("Error: Vision failed (missing mmproj?). Downoad a compatible *mmproj*.gguf file for this model!")
+                        model_base = os.path.splitext(os.path.basename(model_path))[0]
+                        results.append(
+                            f"Error: Vision failed — the mmproj file may be missing or mismatched. "
+                            f"Download the matching *mmproj*.gguf for this model and name it to share "
+                            f"the model name, e.g.: {model_base}-mmproj-BF16.gguf"
+                        )
                     else:
                         results.append(f"Error: {err_msg}")
             

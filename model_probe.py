@@ -208,27 +208,42 @@ class ModelProbe:
         
         candidates = glob.glob(os.path.join(folder, "*mmproj*.gguf"))
         if not candidates:
+            print(f"ℹ️ No *mmproj*.gguf files found in {folder}")
+            print(f"  Tip: Download the matching mmproj file and place it next to your model.")
+            print(f"  Name it to share the model name, e.g.: {base_name}-mmproj-BF16.gguf")
             return None
-            
+
         best_match = None
         best_score = 0
-        
+
         main_tokens = set(re.split(r'[._-]', base_name.lower()))
-        
+        skip = {'gguf', 'mmproj', 'q4', 'k', 'm', 'f16', 'model', 'lora'}
+
+        scored = []
         for cand in candidates:
             c_name = os.path.basename(cand)
             c_base = os.path.splitext(c_name)[0]
             c_tokens = set(re.split(r'[._-]', c_base.lower()))
-            
-            skip = {'gguf', 'mmproj', 'q4', 'k', 'm', 'f16', 'model', 'lora'}
+
             overlap = main_tokens.intersection(c_tokens) - skip
-            
             score = len(overlap)
-            
+            scored.append((score, c_name, cand))
+
             if score > best_score:
                 best_score = score
                 best_match = cand
-                
+
+        # Log matching details so user can verify or fix naming
+        if len(scored) > 1 or (best_match and best_score < 2):
+            scored.sort(key=lambda x: x[0], reverse=True)
+            print(f"ℹ️ mmproj candidates for {filename}:")
+            for sc, name, _ in scored:
+                marker = " ← selected" if name == os.path.basename(best_match) else ""
+                print(f"  score {sc}: {name}{marker}")
+            if best_score < 2:
+                print(f"  ⚠️ Low match score ({best_score}). If vision fails, rename the mmproj to share")
+                print(f"  the model name, e.g.: {base_name}-mmproj-BF16.gguf")
+
         return best_match
 
     @staticmethod
