@@ -589,13 +589,17 @@ class CaptionsTab(QWidget):
 
         if success:
             self.log_msg.emit(f"✅ {message}")
-            self.lbl_status.setText("Installed — please load the model again")
-            QMessageBox.information(
+            self.lbl_status.setText("Installed — restart required")
+            ret = QMessageBox.question(
                 self, "Installation Complete",
                 "llama-cpp-python was installed successfully.\n\n"
-                "Please click 'Load Model' again to load the GGUF model.\n"
-                "(A restart may be required for the new package to take effect.)"
+                "A restart is required for the new package to take effect.\n\n"
+                "Restart VisionCaptioner now?",
+                QMessageBox.Yes | QMessageBox.No,
             )
+            if ret == QMessageBox.Yes:
+                from gui_model_manager import _restart_application
+                _restart_application()
         else:
             self.log_msg.emit(f"❌ Installation failed: {message}")
             self.lbl_status.setText("Installation Failed")
