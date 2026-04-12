@@ -24,7 +24,25 @@
       "Bash(python -m pytest tests/ -v)",
       "Bash(./venv/Scripts/python.exe -m pytest tests/ -v)",
       "Bash(./venv/Scripts/pip.exe install:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(python -m py_compile model_family.py model_probe.py backend.py gui_workers.py tab_captions.py cli.py)",
+      "Bash(python -c \"import json; json.load\\(open\\('models.json'\\)\\); print\\('models.json OK'\\)\")",
+      "Bash(venv/Scripts/python.exe -c \"import transformers; print\\(transformers.__version__\\)\")",
+      "Bash(venv/Scripts/python.exe -c \"from transformers.models.auto.configuration_auto import CONFIG_MAPPING_NAMES; print\\([k for k in CONFIG_MAPPING_NAMES if 'gemma' in k.lower\\(\\)]\\)\")",
+      "Bash(ls \"e:/_python_tools/VisionCaptioner\"/*.bat \"e:/_python_tools/VisionCaptioner\"/*.sh)",
+      "Bash(ls \"e:/_python_tools/VisionCaptioner\"/requirements*.txt)",
+      "Bash(venv/Scripts/python.exe -c \"import llama_cpp; print\\('llama_cpp', llama_cpp.__version__\\); from llama_cpp import llama_chat_format as f; names = [n for n in dir\\(f\\) if 'Handler' in n or 'mtmd' in n.lower\\(\\)]; print\\(names\\)\")",
+      "Bash(curl -s https://api.github.com/repos/JamePeng/llama-cpp-python/releases/latest)",
+      "Bash(python -c \"import json,sys; r=json.load\\(sys.stdin\\); [print\\(a['name']\\) for a in r.get\\('assets',[]\\)]\")",
+      "Bash(curl -s https://api.github.com/repos/JamePeng/llama-cpp-python/releases)",
+      "Bash(python -c ':*)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('tab_captions.py', doraise=True\\); print\\('tab_captions.py OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('gui_workers.py', doraise=True\\); print\\('gui_workers.py OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('backend.py', doraise=True\\); print\\('backend.py OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('gui_model_manager.py', doraise=True\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('gui_model_manager.py', doraise=True\\); print\\('gui_model_manager.py OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('backend.py', doraise=True\\); py_compile.compile\\('model_probe.py', doraise=True\\); print\\('Both OK'\\)\")"
     ]
   }
 }
