@@ -2,7 +2,7 @@
 
 This is a command-line interface (CLI) for the VisionCaptioner tool.
 It allows you to batch process images and videos without opening the GUI window.
-You can use it to generate text captions (using Qwen-VL), segmentation masks (using SAM3), or extract frames from videos based on a text prompt.
+You can use it to generate text captions (using Qwen-VL or Google Gemma 4), segmentation masks (using SAM3), or extract frames from videos based on a text prompt.
 
 ## BASIC USAGE
 Run the script using Python from your terminal or command prompt:
@@ -48,7 +48,7 @@ These arguments apply to all modes.
 ## MODE 1: GENERATING CAPTIONS
 **Command:** `--mode caption` (Default)
 
-These arguments control the **Qwen-VL** model for text generation.
+These arguments control the captioning model for text generation. Both **Qwen-VL** and **Google Gemma 4** model families are supported — the correct backend is selected automatically based on the model folder.
 
 ```bash
 --model
@@ -61,9 +61,16 @@ These arguments control the **Qwen-VL** model for text generation.
     Default: None
 
 --res
-    Maximum image resolution (side length).
+    Maximum image resolution (side length). Used by Qwen models.
+    Ignored for Gemma 4 (which uses --vision-tokens instead).
     Examples: 336, 512, 1024
     Default: 512
+
+--vision-tokens
+    Soft visual token budget per image for Gemma 4 models.
+    Higher = more detail, slower, more VRAM. Ignored for Qwen.
+    Options: 70, 140, 280, 560, 1120
+    Default: model default (280)
 
 --batch-size
     Number of images processed at once.
@@ -103,6 +110,11 @@ python cli.py --folder "C:/Images/Dataset" --quant Int8 --prompt "Describe the l
 **Example C: Resume a stopped job (skip existing)**
 ```bash
 python cli.py --folder "C:/Images/Dataset" --skip-existing
+```
+
+**Example D: Caption with Gemma 4 at high detail**
+```bash
+python cli.py --folder "C:/Images/Dataset" --model Gemma-4-E2B-it --vision-tokens 560
 ```
 
 ---

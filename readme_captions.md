@@ -29,3 +29,13 @@ In your output folder you will find a .txt file for each image/video with the ge
 * You can select a predefined prompt from the list
 * Or you can use the "Custom" setting and type your system prompt in the app
 * Or create/edit the text files in the "prompts" folder
+
+## Model Families ##
+VisionCaptioner supports two Vision-Language Model families:
+
+* **Qwen-VL** (Qwen2.5-VL, Qwen3-VL) — controlled by the "Max Resolution" dropdown.
+* **Google Gemma 4** (E2B, E4B, 26B-A4B, 31B) — controlled by the "Vision Tokens (Gemma)" dropdown, which sets the soft visual token budget per image (70, 140, 280, 560, or 1120). Higher = more detail, slower, more VRAM. The "Max Resolution" setting is ignored for Gemma.
+
+The correct settings panel becomes active automatically when you pick a model from the dropdown. Gemma 4's built-in "thinking" reasoning mode is automatically disabled for captioning.
+
+See [readme_models.md](readme_models.md) for the full list of supported models and download links.

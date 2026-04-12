@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QMessageBox, QGridLayout)
 from PySide6.QtCore import Qt, Signal, QByteArray
 from gui_widgets import ResizableImageLabel
-from gui_workers import ModelLoaderWorker, TestWorker, CaptionWorker
+from gui_workers import ModelLoaderWorker, TestWorker, CaptionWorker, LlamaCppInstallWorker
 from gui_model_manager import ModelManagerDialog
 
 
@@ -105,10 +105,22 @@ class CaptionsTab(QWidget):
         self.combo_res.addItem("1024px (Detailed)", 1024)
         self.combo_res.addItem("1280px (Max/Native)", 1280)
         self.combo_res.setCurrentIndex(2) # Default 768px
-        self.combo_res.setToolTip("Maximum side length for resizing images.\nHigher = Better detail but slower and more VRAM.")
+        self.combo_res.setToolTip("Maximum side length for resizing images.\nHigher = Better detail but slower and more VRAM.\n(Qwen family only — ignored for Gemma.)")
         grid_model.addWidget(self.combo_res, 1, 1)
 
-        
+        # Row 2: Gemma vision token budget (only active for Gemma 4 models)
+        self.lbl_vis_tokens = QLabel("Vision Tokens (Gemma):")
+        grid_model.addWidget(self.lbl_vis_tokens, 2, 0)
+        self.combo_vis_tokens = QComboBox()
+        self.combo_vis_tokens.addItem("Auto (280)", None)
+        self.combo_vis_tokens.addItem("70 (Fastest)", 70)
+        self.combo_vis_tokens.addItem("140 (Fast)", 140)
+        self.combo_vis_tokens.addItem("280 (Default)", 280)
+        self.combo_vis_tokens.addItem("560 (Detailed)", 560)
+        self.combo_vis_tokens.addItem("1120 (Max)", 1120)
+        self.combo_vis_tokens.setToolTip("Gemma 4 soft visual token budget per image.\nHigher = more detail, slower, more VRAM.\nOnly used for Gemma 4 models.")
+        grid_model.addWidget(self.combo_vis_tokens, 2, 1)
+
         left_layout.addLayout(grid_model)
 
         left_layout.addSpacing(10)
@@ -292,11 +304,17 @@ class CaptionsTab(QWidget):
         if not txt: return
 
         is_gguf = txt.lower().endswith(".gguf")
-        
+        is_gemma = ("gemma-4" in txt.lower()) or ("gemma4" in txt.lower())
+
         # Disable settings that don't apply to GGUF models
         self.combo_quant.setEnabled(not is_gguf)
-        self.combo_res.setEnabled(True) 
-        
+        self.combo_res.setEnabled(True)
+
+        # Vision token budget combo only relevant for Gemma family
+        if hasattr(self, 'combo_vis_tokens'):
+            self.combo_vis_tokens.setEnabled(is_gemma and not is_gguf)
+            self.lbl_vis_tokens.setEnabled(is_gemma and not is_gguf)
+
         if is_gguf:
             self.combo_quant.setToolTip("GGUF models are pre-quantized.")
         else:
@@ -410,6 +428,7 @@ class CaptionsTab(QWidget):
             "model": self.model_combo.currentData(), # Save the real name/path, not display text
             "quantization": self.combo_quant.currentText(),
             "resolution_idx": self.combo_res.currentIndex(),
+            "vision_tokens_idx": self.combo_vis_tokens.currentIndex() if hasattr(self, 'combo_vis_tokens') else 0,
             "batch_size": self.spin_batch.value(),
             "frames": self.spin_frames.value(),
             "tokens": self.spin_tokens.value(),
@@ -441,6 +460,9 @@ class CaptionsTab(QWidget):
 
         if "resolution_idx" in settings:
             self.combo_res.setCurrentIndex(min(max(0, settings["resolution_idx"]), self.combo_res.count()-1))
+
+        if "vision_tokens_idx" in settings and hasattr(self, 'combo_vis_tokens'):
+            self.combo_vis_tokens.setCurrentIndex(min(max(0, settings["vision_tokens_idx"]), self.combo_vis_tokens.count()-1))
 
         if "batch_size" in settings: self.spin_batch.setValue(settings["batch_size"])
         if "frames" in settings: self.spin_frames.setValue(settings["frames"])
@@ -479,10 +501,11 @@ class CaptionsTab(QWidget):
         res = self.combo_res.currentData()
         attn_impl = "sdpa"
         use_compile = False
-        
+        vision_tokens = self.combo_vis_tokens.currentData() if hasattr(self, 'combo_vis_tokens') else None
+
         self.log_msg.emit(f"⏳ Loading model: {model_name}...")
 
-        self.loader_worker = ModelLoaderWorker(self.engine, path, quant, res, attn_impl, use_compile)
+        self.loader_worker = ModelLoaderWorker(self.engine, path, quant, res, attn_impl, use_compile, vision_token_budget=vision_tokens)
         self.loader_worker.finished.connect(self.on_model_loaded)
         self.loader_worker.start()
 
@@ -490,17 +513,99 @@ class CaptionsTab(QWidget):
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         QApplication.restoreOverrideCursor()
-        
+
         if success:
             self.log_msg.emit(f"✅ {msg}")
             self.toggle_ui(True)
             self.btn_load.setEnabled(False)
             self.btn_unload.setEnabled(True)
             self.lbl_status.setText("Ready")
+        elif msg == "LLAMA_CPP_NOT_INSTALLED":
+            self.toggle_ui(True, loaded=False)
+            self.lbl_status.setText("Load Failed")
+            self._offer_llama_cpp_install()
         else:
             self.log_msg.emit(f"❌ Error: {msg}")
             self.toggle_ui(True, loaded=False)
             self.lbl_status.setText("Load Failed")
+
+    def _offer_llama_cpp_install(self):
+        """Offer to auto-install llama-cpp-python when a GGUF model is loaded without it."""
+        from llama_cpp_installer import detect_system, GITHUB_PAGE
+
+        info = detect_system()
+
+        # Build a descriptive message showing what was detected
+        lines = [
+            "llama-cpp-python is required for GGUF models but is not installed.\n",
+            "Detected environment:",
+            f"  Python:    {info['python_tag']}",
+            f"  Platform:  {info['platform']}",
+        ]
+        if info["platform"] == "macos":
+            lines.append("  Backend:   Metal (Apple GPU)")
+        else:
+            lines.append(f"  CUDA:      {info['cuda_version'] or 'not detected'}")
+            if info["cuda_tag"]:
+                lines.append(f"  Package:   {info['cuda_tag']}")
+
+        lines.append(f"\nSource: JamePeng/llama-cpp-python")
+        lines.append(f"{GITHUB_PAGE}")
+
+        if not info["cuda_tag"] and info["platform"] != "macos":
+            lines.append("\nCould not determine CUDA version — automatic install")
+            lines.append("is not possible. Please visit the link above and")
+            lines.append("download the correct wheel for your system manually.")
+            self.log_msg.emit("❌ " + "\n".join(lines))
+            QMessageBox.warning(self, "llama-cpp-python Not Installed", "\n".join(lines))
+            return
+
+        lines.append("\nWould you like to download and install it now?")
+
+        ret = QMessageBox.question(
+            self, "Install llama-cpp-python?",
+            "\n".join(lines),
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if ret != QMessageBox.Yes:
+            self.log_msg.emit("❌ llama-cpp-python is not installed. GGUF models require it.")
+            self.log_msg.emit(f"   You can install it manually from: {GITHUB_PAGE}")
+            return
+
+        # Start the install worker
+        self.toggle_ui(False)
+        self.lbl_status.setText("Installing llama-cpp-python...")
+        self.progress.setRange(0, 0)  # indeterminate
+
+        self._install_worker = LlamaCppInstallWorker()
+        self._install_worker.log.connect(lambda m: self.log_msg.emit(m))
+        self._install_worker.finished.connect(self._on_llama_cpp_installed)
+        self._install_worker.start()
+
+    def _on_llama_cpp_installed(self, success, message):
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.toggle_ui(True, loaded=False)
+
+        if success:
+            self.log_msg.emit(f"✅ {message}")
+            self.lbl_status.setText("Installed — please load the model again")
+            QMessageBox.information(
+                self, "Installation Complete",
+                "llama-cpp-python was installed successfully.\n\n"
+                "Please click 'Load Model' again to load the GGUF model.\n"
+                "(A restart may be required for the new package to take effect.)"
+            )
+        else:
+            self.log_msg.emit(f"❌ Installation failed: {message}")
+            self.lbl_status.setText("Installation Failed")
+            from llama_cpp_installer import GITHUB_PAGE
+            QMessageBox.critical(
+                self, "Installation Failed",
+                f"Could not install llama-cpp-python automatically.\n\n"
+                f"{message}\n\n"
+                f"You can try installing manually from:\n{GITHUB_PAGE}"
+            )
 
     def unload_model(self):
         if self.worker: self.worker.stop(); self.worker.wait()
@@ -524,6 +629,12 @@ class CaptionsTab(QWidget):
         self.model_combo.setEnabled(settings_enabled)
         self.combo_quant.setEnabled(settings_enabled)
         self.combo_res.setEnabled(settings_enabled)
+        if hasattr(self, 'combo_vis_tokens'):
+            # Re-evaluate Gemma-only enable when re-enabling
+            if settings_enabled:
+                self.on_model_combo_changed()
+            else:
+                self.combo_vis_tokens.setEnabled(False)
         
         if loaded:
             self.btn_start.setEnabled(enabled)

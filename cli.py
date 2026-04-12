@@ -46,7 +46,8 @@ def load_defaults_from_settings():
             "trigger": data.get("generate_tab", {}).get("trigger", ""),
             "prompt": data.get("generate_tab", {}).get("prompt_text", ""),
             "prompt_suffix": data.get("generate_tab", {}).get("suffix", ""),
-            "skip_existing": data.get("generate_tab", {}).get("skip_existing", False)
+            "skip_existing": data.get("generate_tab", {}).get("skip_existing", False),
+            "vision_tokens": data.get("generate_tab", {}).get("vision_tokens", None)
         }
 
         if "generate_tab" not in data:
@@ -128,6 +129,7 @@ def main():
     grp_cap.add_argument("--prompt", type=str, default=defaults.get("prompt", "Describe this image."), help="System prompt.")
     grp_cap.add_argument("--suffix", type=str, default=defaults.get("prompt_suffix", ""), help="Suffix to append to prompt.")
     grp_cap.add_argument("--trigger", type=str, default=defaults.get("trigger", ""), help="Trigger word to prepend to caption.")
+    grp_cap.add_argument("--vision-tokens", type=int, default=defaults.get("vision_tokens"), choices=[70, 140, 280, 560, 1120], help="Gemma 4 vision token budget per image (ignored for Qwen).")
     
     # Masking Config (SAM3)
     grp_mask = parser.add_argument_group("Masking Arguments")
@@ -210,7 +212,7 @@ def main():
         
         print(f"✅ Found {len(all_pairs)} files to process.")
 
-        success, msg = engine.load_model(model_path, quantization_type=args.quant, max_resolution=args.res)
+        success, msg = engine.load_model(model_path, quantization_type=args.quant, max_resolution=args.res, vision_token_budget=args.vision_tokens)
         if not success:
             print(f"❌ Model Load Failed: {msg}")
             return

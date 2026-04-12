@@ -4,7 +4,7 @@ import io
 import torch
 from file_utils import find_media_files, IMAGE_EXTS, VIDEO_EXTS
 from transformers import AutoModelForImageTextToText, AutoProcessor, StoppingCriteria, StoppingCriteriaList
-from qwen_vl_utils import process_vision_info
+from model_family import get_family, QwenFamily
 import gc
 import cv2
 from PIL import Image, ImageOps
@@ -76,6 +76,7 @@ class QwenEngine:
         self.processor = None
         self.device = self.get_device_type()
         self.is_gguf = False
+        self.family = QwenFamily()
 
     def get_device_type(self):
         """Detects the available hardware acceleration."""
@@ -141,6 +142,7 @@ class QwenEngine:
             self.model = None
 
         self.is_gguf = False
+        self.family = QwenFamily()
 
         # 3. GC
         for _ in range(3):
@@ -158,7 +160,7 @@ class QwenEngine:
         
         return "Model unloaded. Memory cleared."
 
-    def load_model(self, model_path, quantization_type="None", max_resolution=512, attn_impl="sdpa", use_compile=False):
+    def load_model(self, model_path, quantization_type="None", max_resolution=512, attn_impl="sdpa", use_compile=False, vision_token_budget=None):
         try:
             from model_probe import ModelProbe
             
@@ -177,8 +179,10 @@ class QwenEngine:
             
             # --- GGUF HANDLING ---
             if probe_info.get("format") == "gguf":
+                if probe_info.get("backend") == "gemma_gguf":
+                    return False, "Gemma 4 GGUF is not yet supported (llama-cpp-python has no Gemma4 chat handler). Please download the HuggingFace folder version instead."
                 if not HAS_LLAMA:
-                    return False, "llama-cpp-python not installed. Please check requirements."
+                    return False, "LLAMA_CPP_NOT_INSTALLED"
 
                 # Verify Llama version
                 try:
@@ -251,16 +255,26 @@ class QwenEngine:
 
             # --- HF TRANSFORMERS HANDLING ---
             self.is_gguf = False
-            
+
             # Check backend recommendation
             backend_type = probe_info.get("backend", "unknown")
             print(f"Detected Backend: {backend_type}")
 
-            # Standard HF Loading
-            total_pixels = max_resolution * max_resolution
-            min_pixels = 256 * 28 * 28
+            # Select family strategy (Qwen, Gemma4, ...)
+            self.family = get_family(probe_info, model_path)
+            print(f"Model family: {self.family.name}")
 
-            self.processor = AutoProcessor.from_pretrained(model_path, min_pixels=min_pixels, max_pixels=total_pixels, trust_remote_code=True, use_fast=True)
+            # Family-specific processor kwargs
+            proc_kwargs = self.family.processor_kwargs(max_resolution=max_resolution, vision_token_budget=vision_token_budget)
+            proc_kwargs.update({"trust_remote_code": True, "use_fast": True})
+
+            try:
+                self.processor = AutoProcessor.from_pretrained(model_path, **proc_kwargs)
+            except TypeError as e:
+                # Some processors reject family-specific kwargs (e.g. visual_token_budget on older versions).
+                # Retry without them.
+                print(f"⚠️ AutoProcessor rejected family kwargs ({e}); retrying with defaults.")
+                self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True, use_fast=True)
             
             if hasattr(self.processor, "tokenizer"):
                 self.processor.tokenizer.padding_side = "left"
@@ -510,18 +524,17 @@ class QwenEngine:
                 ext = os.path.splitext(f_path)[1].lower()
                 is_video = ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm']
                 mask_path = mask_paths[i] if mask_paths and i < len(mask_paths) else None
-                
-                content = []
-                
+
+                pil_frames = None
+                final_image_obj = None
+                load_error = False
+
                 if is_video:
-                    frames = self.extract_video_frames(f_path, num_frames=frame_count, log_callback=log_callback, stop_event=stop_event)
-                    if not frames:
+                    pil_frames = self.extract_video_frames(f_path, num_frames=frame_count, log_callback=log_callback, stop_event=stop_event)
+                    if not pil_frames:
                         if stop_event and stop_event(): return []
-                        content.append({"type": "text", "text": "[Video Load Error]"})
-                    else:
-                        content.append({"type": "video", "video": frames})
+                        load_error = True
                 else:
-                    final_image_obj = None
                     if mask_path and os.path.exists(mask_path):
                         final_image_obj = self.apply_mask(f_path, mask_path)
                     else:
@@ -531,23 +544,25 @@ class QwenEngine:
                             final_image_obj = pil_img
                         except Exception as e:
                             print(f"Error loading image {f_path}: {e}")
-                            final_image_obj = f_path 
-                    
-                    content.append({"type": "image", "image": final_image_obj})
+                            final_image_obj = f_path
 
                 # Apply prompt modification for masks
                 local_prompt = prompt_text
                 if mask_path and os.path.exists(mask_path) and not is_video:
                     local_prompt += " The background is masked and transparent. Describe the foreground subject ONLY. Do not mention the background or transparency."
 
-                content.append({"type": "text", "text": local_prompt})
+                if load_error:
+                    content = [{"type": "text", "text": "[Video Load Error] " + local_prompt}]
+                else:
+                    content = self.family.build_content_block(is_video, final_image_obj, pil_frames, local_prompt)
+
                 messages = [{"role": "user", "content": content}]
-                
-                text = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+                text = self.family.apply_template(self.processor, messages)
                 texts.append(text)
-                
+
                 if stop_event and stop_event(): return []
-                img_in, vid_in = process_vision_info(messages)
+                img_in, vid_in = self.family.extract_vision_inputs(messages)
                 all_image_inputs.append(img_in)
                 all_video_inputs.append(vid_in)
 
@@ -589,7 +604,8 @@ class QwenEngine:
                 return [] 
 
             generated_ids_trimmed = [ out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids) ]
-            output_texts = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+            skip_special = self.family.decode_skip_special_tokens()
+            output_texts = self.processor.batch_decode(generated_ids_trimmed, skip_special_tokens=skip_special, clean_up_tokenization_spaces=False)
 
             del inputs, generated_ids, generated_ids_trimmed
             
@@ -601,7 +617,7 @@ class QwenEngine:
 
             final_results = []
             for txt in output_texts:
-                clean = txt.strip()
+                clean = self.family.clean_output(self.processor, txt).strip()
                 if trigger_word and trigger_word.strip():
                     clean = f"{trigger_word.strip()}, {clean}"
                 final_results.append(clean)

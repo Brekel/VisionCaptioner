@@ -5,21 +5,21 @@
 
 **VisionCaptioner** is a local desktop application designed to automate the creation of detailed captions for image & video datasets. 
 
-Built specifically for AI researchers and enthusiasts training custom models (LoRA, Fine-tuning, Flux, Z-Image Turbo, Qwen-Image, SDXL, Wan, HunyuanVideo etc). VisionCaptioner leverages the **Qwen-VL** family of Vision-Language Models to generate high-quality, context-aware descriptions in batch. 
+Built specifically for AI researchers and enthusiasts training custom models (LoRA, Fine-tuning, Flux, Z-Image Turbo, Qwen-Image, SDXL, Wan, HunyuanVideo etc). VisionCaptioner leverages Vision-Language Models from the **Qwen-VL** and **Google Gemma 4** families to generate high-quality, context-aware descriptions in batch. 
 
 ![Screenshot VisonCaptioner](screenshots/captions.jpg)
 
 ## **✨ Features**
 
 *   **User-Friendly Interface:** Simple GUI to manage your image & video captioning tasks.
-*   **Caption generation** Automatically generate captions using Qwen-VL models.
+*   **Caption generation** Automatically generate captions using Qwen-VL or Google Gemma 4 models.
     *   **Video Support:** Unlike other tools, this analyzes video files by extracting multiple frames to understand motion and context.
     *   **LoRA Friendly:** Includes features specifically for training, such as **Trigger Word** injection and skipping existing caption files.
     *   **Review & Edit** Quickly review and manually edit your captions on a dataset.
     *   **Find & Replace** Functionality to find and replace strings in your captions dataset, including often used presets.
     *   **System Prompts:** Choose from built-in presets (tuned for various models) or write your own custom instructions.
     *   **Resolution & Quantization:** Adjustable settings to balance between speed, VRAM usage, and descriptive detail.
-    *   **Works with many Qwen-VL models** QwenVL-2.5, QwenVL-3, base models, Abliterated versions, GGUF models
+    *   **Works with many Vision-Language models** Qwen2.5-VL, Qwen3-VL, Google Gemma 4 (E2B/E4B/26B-A4B/31B), base models, Abliterated versions, GGUF models (Qwen only for now)
 *   **Masking Support:** Functionality to create mask files using Segment Anything 3 model with promptable subject.
     *   **Editing** Functionality to quickly paint/edit/extract/contract masks in a visual editor.
     *   **Different mask formats** Masks can be saved as separate files or embedded in the image files.
@@ -76,9 +76,18 @@ https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installra
 
 
 ## Update
+The easiest way to update is to use the provided update scripts, which will pull the latest code from git **and** upgrade your Python packages in one step:
+
+* **Windows:** double-click `update.bat` (or run it from a terminal)
+* **Linux / macOS:** `./update.sh` (you may need to `chmod +x update.sh` once)
+
+Or update manually:
 ```bash
 cd VisionCaptioner
 git pull
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # Linux / macOS
+pip install --upgrade -r requirements.txt
 ```
 
 ## **🚀 Launching the Application**
@@ -113,6 +122,8 @@ python main.py
 
 ## Acknowledgements
 Qwen Team: Alibaba Cloud - For developing and open-sourcing the powerful [Qwen-VL models](https://github.com/QwenLM/Qwen3-VL).
+
+Google DeepMind - For developing and open-sourcing the [Gemma 4](https://huggingface.co/google) family of multimodal models.
 
 Meta AI - For developing and open-sourcing the [Segment Anything Model 3 (SAM3)](https://github.com/facebookresearch/sam3).
 

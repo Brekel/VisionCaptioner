@@ -7,8 +7,8 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
                                QTableWidgetItem, QPushButton, QLabel, QHeaderView, 
                                QMessageBox, QLineEdit, QTextEdit, QProgressBar, 
                                QGroupBox, QWidget, QSizePolicy)
-from PySide6.QtCore import Qt, QThread, Signal, QObject
-from PySide6.QtGui import QColor, QTextCursor, QCursor
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QUrl
+from PySide6.QtGui import QColor, QTextCursor, QCursor, QDesktopServices
 
 # Try to import huggingface_hub
 try:
@@ -18,6 +18,15 @@ except ImportError:
     HF_AVAILABLE = False
 
 MODELS_FILE = "models.json"
+
+
+def _restart_application():
+    """Restart VisionCaptioner by launching a new process and exiting the current one."""
+    import subprocess
+    subprocess.Popen([sys.executable] + sys.argv)
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance().quit()
+
 
 from model_probe import ModelProbe
 
@@ -128,6 +137,45 @@ class ModelManagerDialog(QDialog):
         token_layout.addWidget(self.txt_token)
         hf_layout.addLayout(token_layout)
         layout.addWidget(hf_group)
+
+        # --- GGUF / llama-cpp-python Group ---
+        gguf_group = QGroupBox("GGUF Support (llama-cpp-python)")
+        gguf_layout = QVBoxLayout(gguf_group)
+
+        self.lbl_llama_status = QLabel()
+        self.lbl_llama_status.setWordWrap(True)
+        self.lbl_llama_status.setStyleSheet("color: #ccc; padding: 2px;")
+        gguf_layout.addWidget(self.lbl_llama_status)
+
+        llama_btn_layout = QHBoxLayout()
+        self.btn_install_llama = QPushButton("⬇️ Install / Update llama-cpp-python")
+        self.btn_install_llama.setToolTip(
+            "Detect your system (Python, CUDA) and install or upgrade\n"
+            "llama-cpp-python from JamePeng's GitHub releases."
+        )
+        self.btn_install_llama.clicked.connect(self.install_llama_cpp)
+        llama_btn_layout.addWidget(self.btn_install_llama)
+
+        self.btn_llama_github = QPushButton("🌐 Open GitHub Releases")
+        self.btn_llama_github.setToolTip("Open JamePeng/llama-cpp-python releases page in your browser")
+        self.btn_llama_github.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("https://github.com/JamePeng/llama-cpp-python/releases"))
+        )
+        llama_btn_layout.addWidget(self.btn_llama_github)
+
+        llama_btn_layout.addStretch()
+        gguf_layout.addLayout(llama_btn_layout)
+
+        self.llama_log = QTextEdit()
+        self.llama_log.setReadOnly(True)
+        self.llama_log.setFixedHeight(140)
+        self.llama_log.setStyleSheet("background-color: #1a1a1a; color: #ccc; font-family: Consolas, monospace; font-size: 9pt;")
+        self.llama_log.setVisible(False)
+        gguf_layout.addWidget(self.llama_log)
+
+        layout.addWidget(gguf_group)
+
+        self._refresh_llama_status()
 
         # --- Actions Group ---
         action_layout = QHBoxLayout()
@@ -322,10 +370,107 @@ class ModelManagerDialog(QDialog):
                 QMessageBox.critical(self, "Error", f"Download failed:\n{msg}")
         self.start_scan() # Refresh
 
+    # --- llama-cpp-python install/upgrade ---
+
+    def _refresh_llama_status(self):
+        """Update the llama-cpp-python status label."""
+        try:
+            import llama_cpp
+            ver = getattr(llama_cpp, "__version__", "unknown")
+            self.lbl_llama_status.setText(f"✅ Installed — llama-cpp-python <b>{ver}</b>")
+            self.btn_install_llama.setText("⬆️ Upgrade llama-cpp-python")
+        except ImportError:
+            self.lbl_llama_status.setText("❌ Not installed — required for GGUF models")
+            self.btn_install_llama.setText("⬇️ Install llama-cpp-python")
+
+    def install_llama_cpp(self):
+        """Detect the system and install/upgrade llama-cpp-python."""
+        from llama_cpp_installer import detect_system, GITHUB_PAGE
+
+        info = detect_system()
+
+        # Show what we detected and ask for confirmation
+        lines = [
+            "Detected environment:",
+            f"  Python:    {info['python_tag']}",
+            f"  Platform:  {info['platform']}",
+        ]
+        if info["platform"] == "macos":
+            lines.append("  Backend:   Metal (Apple GPU)")
+        else:
+            lines.append(f"  CUDA:      {info['cuda_version'] or 'not detected'}")
+            if info["cuda_tag"]:
+                lines.append(f"  Package:   {info['cuda_tag']}")
+
+        lines.append(f"\nSource: JamePeng/llama-cpp-python")
+        lines.append(f"{GITHUB_PAGE}")
+
+        if not info["cuda_tag"] and info["platform"] != "macos":
+            lines.append("\nCould not determine CUDA version — automatic install")
+            lines.append("is not possible. Please visit the GitHub page and")
+            lines.append("download the correct wheel for your system manually.")
+            QMessageBox.warning(self, "Cannot Auto-Detect", "\n".join(lines))
+            return
+
+        lines.append("\nThis will download and pip install the matching wheel.")
+        lines.append("Proceed?")
+
+        ret = QMessageBox.question(
+            self, "Install / Upgrade llama-cpp-python?",
+            "\n".join(lines),
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if ret != QMessageBox.Yes:
+            return
+
+        # Show log area and start the worker
+        self.llama_log.setVisible(True)
+        self.llama_log.clear()
+        self.toggle_interface(False)
+        self.btn_install_llama.setEnabled(False)
+        self.btn_install_llama.setText("Installing...")
+
+        from gui_workers import LlamaCppInstallWorker
+        self._install_worker = LlamaCppInstallWorker()
+        self._install_worker.log.connect(self._on_llama_log)
+        self._install_worker.finished.connect(self._on_llama_install_finished)
+        self._install_worker.start()
+
+    def _on_llama_log(self, msg):
+        self.llama_log.append(msg)
+        # Auto-scroll to bottom
+        self.llama_log.verticalScrollBar().setValue(self.llama_log.verticalScrollBar().maximum())
+
+    def _on_llama_install_finished(self, success, message):
+        self.toggle_interface(True)
+        self.btn_install_llama.setEnabled(True)
+        self._refresh_llama_status()
+
+        if success:
+            ret = QMessageBox.question(
+                self, "Installation Complete",
+                "llama-cpp-python was installed successfully.\n\n"
+                "A restart is required for the new package to take effect.\n\n"
+                "Restart VisionCaptioner now?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if ret == QMessageBox.Yes:
+                _restart_application()
+        else:
+            from llama_cpp_installer import GITHUB_PAGE
+            QMessageBox.critical(
+                self, "Installation Failed",
+                f"Could not install llama-cpp-python automatically.\n\n"
+                f"{message}\n\n"
+                f"You can try installing manually from:\n{GITHUB_PAGE}"
+            )
+
     def toggle_interface(self, enabled):
         self.table.setEnabled(enabled)
         self.btn_close.setEnabled(enabled)
         self.btn_scan.setEnabled(enabled)
+        self.btn_install_llama.setEnabled(enabled)
+        self.btn_llama_github.setEnabled(enabled)
 
     def closeEvent(self, event):
         super().closeEvent(event)

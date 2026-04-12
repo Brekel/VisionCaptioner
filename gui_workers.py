@@ -325,14 +325,15 @@ class ScanWorker(QThread):
 
 class ModelLoaderWorker(QThread):
     finished = Signal(bool, str)
-    def __init__(self, engine, path, quant, res, attn_impl="sdpa", use_compile=False):
+    def __init__(self, engine, path, quant, res, attn_impl="sdpa", use_compile=False, vision_token_budget=None):
         super().__init__()
         self.engine, self.path, self.quant, self.res = engine, path, quant, res
         self.attn_impl = attn_impl
         self.use_compile = use_compile
+        self.vision_token_budget = vision_token_budget
     def run(self):
         try:
-            success, msg = self.engine.load_model(self.path, self.quant, self.res, self.attn_impl, self.use_compile)
+            success, msg = self.engine.load_model(self.path, self.quant, self.res, self.attn_impl, self.use_compile, vision_token_budget=self.vision_token_budget)
             self.finished.emit(success, msg)
         except Exception as e:
             self.finished.emit(False, f"Critical Worker Error: {e}")
@@ -475,3 +476,14 @@ class CropWorker(QThread):
 
     def stop(self):
         self.is_running = False
+
+
+class LlamaCppInstallWorker(QThread):
+    """Background worker that detects the system and installs llama-cpp-python."""
+    log = Signal(str)
+    finished = Signal(bool, str)  # success, message
+
+    def run(self):
+        from llama_cpp_installer import run_install
+        success, message = run_install(log=lambda msg: self.log.emit(msg))
+        self.finished.emit(success, message)

@@ -96,5 +96,33 @@
         "folder": "Qwen3-VL-32B-Instruct-abliterated",
         "description": "Uncensored Next-Gen Large.",
         "gated": false
+    },
+    {
+        "name": "Gemma-4-E2B-it",
+        "repo_id": "google/gemma-4-E2B-it",
+        "folder": "Gemma-4-E2B-it",
+        "description": "Google Gemma 4. Efficient (~2.3B active params). Good for 8-12GB GPUs.",
+        "gated": false
+    },
+    {
+        "name": "Gemma-4-E4B-it",
+        "repo_id": "google/gemma-4-E4B-it",
+        "folder": "Gemma-4-E4B-it",
+        "description": "Google Gemma 4. ~4.5B active params. Higher quality, needs ~16GB.",
+        "gated": false
+    },
+    {
+        "name": "Gemma-4-26B-A4B-it",
+        "repo_id": "google/gemma-4-26B-A4B-it",
+        "folder": "Gemma-4-26B-A4B-it",
+        "description": "Google Gemma 4 MoE: 26B total, only 4B active. Fast inference, heavy VRAM.",
+        "gated": false
+    },
+    {
+        "name": "Gemma-4-31B-it",
+        "repo_id": "google/gemma-4-31B-it",
+        "folder": "Gemma-4-31B-it",
+        "description": "Google Gemma 4 Dense 31B. Top quality, requires 48GB+ or NF4.",
+        "gated": false
     }
 ]

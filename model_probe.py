@@ -104,17 +104,23 @@ class ModelProbe:
             if model_type in ["qwen2_5_vl", "qwen2", "qwen2.5", "qwen3_vl"]:
                 res["backend"] = "qwen_hf"
                 res["unified_vision"] = True
+            elif model_type.startswith("gemma4") or model_type == "gemma4":
+                res["backend"] = "gemma_hf"
+                res["unified_vision"] = bool(config.get("vision_config")) or True
             elif model_type == "mllama":
                 res["backend"] = "llama_hf"
             elif "llava" in model_type:
                 res["backend"] = "llava_hf"
             elif "sam" in model_type:
                  res["backend"] = "sam3"
-            
+
             if res["backend"] == "unknown":
                  lower_path = folder_path.lower()
                  if "qwen" in lower_path and "vl" in lower_path:
                       res["backend"] = "qwen_hf"
+                      res["unified_vision"] = True
+                 elif "gemma-4" in lower_path or "gemma4" in lower_path:
+                      res["backend"] = "gemma_hf"
                       res["unified_vision"] = True
                  elif "sam3" in lower_path:
                       res["backend"] = "sam3"
@@ -177,8 +183,14 @@ class ModelProbe:
                         pass
             
             if res["architecture"] == "unknown":
-                if "qwen" in os.path.basename(file_path).lower():
+                fname_lower = os.path.basename(file_path).lower()
+                if "qwen" in fname_lower:
                     res["architecture"] = "qwen2"
+                elif "gemma-4" in fname_lower or "gemma4" in fname_lower:
+                    res["architecture"] = "gemma4"
+
+            if res["architecture"].startswith("gemma4"):
+                res["backend"] = "gemma_gguf"
             
             if not has_vision_tensors:
                 res["mmproj_detected"] = ModelProbe.find_matching_mmproj(file_path)
