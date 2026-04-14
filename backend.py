@@ -257,7 +257,7 @@ class QwenEngine:
                     llm_kwargs = {
                         "model_path": model_path,
                         "n_ctx": 32768,  # Large context needed for multi-frame video (each frame = many vision tokens)
-                        "n_batch": 32768, # Must match n_ctx for large vision batches
+                        "n_batch": 8192, # Prompt-ingest chunk size. Large enough for ~8 video frames of Qwen-VL vision tokens while reclaiming scratch VRAM vs n_ctx-sized n_batch.
                         "n_gpu_layers": n_gpu_layers,
                         "verbose": False,
                         "chat_handler": chat_handler,

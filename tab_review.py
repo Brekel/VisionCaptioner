@@ -7,8 +7,8 @@ import shutil
 import numpy as np
 from PIL import Image, ImageOps
 from file_utils import find_media_files, get_display_name, ALL_MEDIA_EXTS
-from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QTextEdit, QSlider, QLabel, QSplitter, QGroupBox, 
-                               QLineEdit, QCheckBox, QPushButton, QMessageBox, QFormLayout, QFrame, QSizePolicy, QColorDialog, QButtonGroup, QProgressDialog, QComboBox)
+from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QTextEdit, QSlider, QLabel, QSplitter, QGroupBox,
+                               QLineEdit, QCheckBox, QPushButton, QMessageBox, QFormLayout, QFrame, QSizePolicy, QColorDialog, QButtonGroup, QProgressDialog, QComboBox, QScrollArea, QStyle)
 from PySide6.QtCore import Qt, QTimer, Signal, QByteArray, QCoreApplication
 from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QShortcut, QKeySequence
 from gui_widgets import ResizableImageLabel
@@ -199,15 +199,18 @@ class ReviewTab(QWidget):
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
         
-        # Toolbar
-        toolbar = QHBoxLayout()
-        toolbar.setContentsMargins(0, 0, 0, 0)
-        
+        # Toolbar — wrapped in a horizontal scroll area so the window can shrink below
+        # the toolbar's natural width on smaller screens. Scrollbar only appears when needed.
+        toolbar_container = QWidget()
+        toolbar = QHBoxLayout(toolbar_container)
+        toolbar.setContentsMargins(2, 2, 2, 2)
+        toolbar.setSpacing(3)
+
         self.chk_show_mask = QCheckBox("Show Mask Overlay")
         self.chk_show_mask.setChecked(True)
         self.chk_show_mask.clicked.connect(self.on_show_mask_toggled)
         self.chk_show_mask.toggled.connect(self.update_image_display)
-        self.chk_show_mask.setFixedWidth(190)
+        self.chk_show_mask.setFixedWidth(155)
         
         self.btn_color_picker = QPushButton()
         self.btn_color_picker.setToolTip("Set overlay background color")
@@ -227,7 +230,7 @@ class ReviewTab(QWidget):
         self.slider_opacity.valueChanged.connect(lambda v: self.lbl_opacity_val.setText(f"{v}%"))
         
         toolbar.addWidget(self.chk_show_mask)
-        toolbar.addSpacing(5)
+        toolbar.addSpacing(2)
         toolbar.addWidget(self.btn_color_picker)
         toolbar.addWidget(self.slider_opacity)
         toolbar.addWidget(self.lbl_opacity_val)
@@ -265,7 +268,7 @@ class ReviewTab(QWidget):
 
         toolbar.addWidget(self.btn_tool_bucket)
         toolbar.addWidget(self.btn_tool_brush)
-        toolbar.addSpacing(10)
+        toolbar.addSpacing(4)
         
         # Brush Controls
         self.lbl_brush_size = QLabel("Brush:")
@@ -353,8 +356,22 @@ class ReviewTab(QWidget):
         self.chk_confirm_actions.setChecked(True)
         self.chk_confirm_actions.setToolTip("Uncheck to disable confirmation popups for Fill, Crop, and Discard operations.")
         toolbar.addWidget(self.chk_confirm_actions)
-        
-        right_layout.addLayout(toolbar)
+
+        toolbar_scroll = QScrollArea()
+        toolbar_scroll.setWidget(toolbar_container)
+        toolbar_scroll.setWidgetResizable(True)
+        toolbar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        toolbar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        toolbar_scroll.setFrameShape(QFrame.NoFrame)
+        # Reserve enough height for the toolbar plus the horizontal scrollbar so widgets
+        # don't get clipped when the scrollbar appears on narrow windows.
+        scrollbar_extent = toolbar_scroll.style().pixelMetric(QStyle.PM_ScrollBarExtent)
+        toolbar_fixed_height = toolbar_container.sizeHint().height() + scrollbar_extent + 6
+        toolbar_scroll.setFixedHeight(toolbar_fixed_height)
+        toolbar_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        # Allow the scroll area itself to shrink well below the toolbar's natural width.
+        toolbar_scroll.setMinimumWidth(0)
+        right_layout.addWidget(toolbar_scroll)
         
         # Mouse Help Label
         self.lbl_mouse_help = QLabel("Left Mouse Button: Draw / Fill (mask foreground)       |       Right Mouse Button: Erase / Fill (mask background)       |       Middle Mouse Button: Switch Tool       |       Scroll Wheel: scroll through image list")

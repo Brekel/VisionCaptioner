@@ -146,7 +146,7 @@ class CaptionsTab(QWidget):
         grid_params.addWidget(QLabel("Max Tokens:"), 0, 2)
         self.spin_tokens = QSpinBox()
         self.spin_tokens.setRange(50, 4096)
-        self.spin_tokens.setValue(1024)
+        self.spin_tokens.setValue(384)
         self.spin_tokens.setToolTip("Maximum length of the generated text description.")
         grid_params.addWidget(self.spin_tokens, 1, 2)
         
@@ -314,6 +314,23 @@ class CaptionsTab(QWidget):
         if hasattr(self, 'combo_vis_tokens'):
             self.combo_vis_tokens.setEnabled(is_gemma and not is_gguf)
             self.lbl_vis_tokens.setEnabled(is_gemma and not is_gguf)
+            if is_gemma and is_gguf:
+                gguf_tip = (
+                    "Not configurable for GGUF models.\n"
+                    "The vision token count is baked into the mmproj file at conversion time\n"
+                    "and llama-cpp-python exposes no runtime override.\n"
+                    "Load the HF folder version of Gemma 4 to adjust this setting."
+                )
+                self.combo_vis_tokens.setToolTip(gguf_tip)
+                self.lbl_vis_tokens.setToolTip(gguf_tip)
+            else:
+                default_tip = (
+                    "Gemma 4 soft visual token budget per image.\n"
+                    "Higher = more detail, slower, more VRAM.\n"
+                    "Only used for Gemma 4 models."
+                )
+                self.combo_vis_tokens.setToolTip(default_tip)
+                self.lbl_vis_tokens.setToolTip(default_tip)
 
         if is_gguf:
             self.combo_quant.setToolTip("GGUF models are pre-quantized.")
@@ -520,6 +537,7 @@ class CaptionsTab(QWidget):
             self.btn_load.setEnabled(False)
             self.btn_unload.setEnabled(True)
             self.lbl_status.setText("Ready")
+            self._apply_gguf_batch_lock()
         elif msg == "LLAMA_CPP_NOT_INSTALLED":
             self.toggle_ui(True, loaded=False)
             self.lbl_status.setText("Load Failed")
@@ -624,6 +642,25 @@ class CaptionsTab(QWidget):
         self.toggle_ui(True, loaded=False)
         self.btn_load.setEnabled(True)
         self.btn_unload.setEnabled(False)
+        self._apply_gguf_batch_lock()
+
+    def _apply_gguf_batch_lock(self):
+        is_gguf = bool(getattr(self.engine, "is_gguf", False)) and self.engine.model is not None
+        if is_gguf:
+            self.spin_batch.setEnabled(False)
+            self.spin_batch.setToolTip(
+                "Not configurable for GGUF models.\n"
+                "llama-cpp-python processes images one at a time — there is no\n"
+                "multi-sequence batching when a multimodal chat handler is active,\n"
+                "so batch size has no effect on throughput.\n"
+                "Load an HF folder model to use batched generation."
+            )
+        else:
+            self.spin_batch.setEnabled(True)
+            self.spin_batch.setToolTip(
+                "Number of images to process simultaneously.\n"
+                "Increase for speed, decrease if running out of VRAM."
+            )
 
     def toggle_ui(self, enabled, loaded=True):
         self.request_lock.emit(not enabled)
@@ -698,8 +735,9 @@ class CaptionsTab(QWidget):
         self.log_msg.emit("🚀 Starting processing...")
 
         p = self.txt_prompt.toPlainText() + "\n" + self.txt_suffix.toPlainText()
+        effective_batch = 1 if getattr(self.engine, "is_gguf", False) else self.spin_batch.value()
         settings = {
-            "batch_size": self.spin_batch.value(), "skip_existing": self.chk_skip.isChecked(),
+            "batch_size": effective_batch, "skip_existing": self.chk_skip.isChecked(),
             "frame_count": self.spin_frames.value(), "max_tokens": self.spin_tokens.value(),
             "prompt": p, "trigger": self.txt_trigger.text(), "use_masks": self.chk_use_masks.isChecked(),
             "recursive": self.recursive
@@ -729,12 +767,12 @@ class CaptionsTab(QWidget):
             remaining_items = self.progress.maximum() - val
             eta_seconds = remaining_items * speed_per_item
             
-            # Calculate Batch Speed
-            current_batch_size = self.spin_batch.value()
-            
+            # Calculate Batch Speed (GGUF runs serially, treat as batch of 1)
+            current_batch_size = 1 if getattr(self.engine, "is_gguf", False) else self.spin_batch.value()
+
             # Base string
             speed_str = f"{speed_per_item:.2f} s/item"
-            
+
             # Append Batch speed if batch size > 1
             if current_batch_size > 1:
                 speed_per_batch = speed_per_item * current_batch_size

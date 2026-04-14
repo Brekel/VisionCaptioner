@@ -42,7 +42,7 @@ def load_defaults_from_settings():
             "res": RES_MAP.get(data.get("generate_tab", {}).get("resolution_idx", 1), 512),
             "batch_size": data.get("generate_tab", {}).get("batch_size", 16),
             "frame_count": data.get("generate_tab", {}).get("frames", 8),
-            "max_tokens": data.get("generate_tab", {}).get("tokens", 1024),
+            "max_tokens": data.get("generate_tab", {}).get("tokens", 384),
             "trigger": data.get("generate_tab", {}).get("trigger", ""),
             "prompt": data.get("generate_tab", {}).get("prompt_text", ""),
             "prompt_suffix": data.get("generate_tab", {}).get("suffix", ""),
@@ -125,7 +125,7 @@ def main():
     grp_cap.add_argument("--res", type=int, default=defaults.get("res", 512), help="Max resolution for captioning.")
     grp_cap.add_argument("--batch-size", type=int, default=defaults.get("batch_size", 4), help="Batch size.")
     grp_cap.add_argument("--frame-count", type=int, default=defaults.get("frame_count", 8), help="Video frame count (for captioning).")
-    grp_cap.add_argument("--max-tokens", type=int, default=defaults.get("max_tokens", 1024), help="Max output tokens.")
+    grp_cap.add_argument("--max-tokens", type=int, default=defaults.get("max_tokens", 384), help="Max output tokens.")
     grp_cap.add_argument("--prompt", type=str, default=defaults.get("prompt", "Describe this image."), help="System prompt.")
     grp_cap.add_argument("--suffix", type=str, default=defaults.get("prompt_suffix", ""), help="Suffix to append to prompt.")
     grp_cap.add_argument("--trigger", type=str, default=defaults.get("trigger", ""), help="Trigger word to prepend to caption.")
