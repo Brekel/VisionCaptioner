@@ -10,6 +10,11 @@ import numpy as np
 from PIL import Image, ImageOps
 from file_utils import find_media_files, get_display_name, IMAGE_EXTS
 
+# Silence MediaPipe / TFLite native-log chatter (xnnpack default, feedback-manager
+# disabled, XNNPACK delegate INFO) before the first `import mediapipe`.
+os.environ.setdefault("GLOG_minloglevel", "2")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
 try:
     import mediapipe as mp
     _HAS_MEDIAPIPE = True
@@ -45,6 +50,8 @@ class QAAnalysisWorker(QThread):
         self._tls = threading.local()
         self._landmarkers_lock = threading.Lock()
         self._all_landmarkers = []  # track for cleanup
+        self._person_detectors_lock = threading.Lock()
+        self._all_person_detectors = []  # track for cleanup
 
     def stop(self):
         self._stop = True
@@ -151,6 +158,51 @@ class QAAnalysisWorker(QThread):
 
         return face_count, eyes_closed
 
+    # -- person detection (MediaPipe Object Detector) -----------------------
+    def _get_person_detector(self):
+        """Lazy-init a per-thread MediaPipe ObjectDetector restricted to 'person'."""
+        detector = getattr(self._tls, "person_detector", None)
+        if detector is not None:
+            return detector
+        if not _HAS_MEDIAPIPE:
+            return None
+        model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "_")
+        model_path = os.path.join(model_dir, "efficientdet_lite2.tflite")
+        if not os.path.exists(model_path):
+            self._download_model(
+                "https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite",
+                model_path)
+        if not os.path.exists(model_path):
+            return None
+        try:
+            options = mp.tasks.vision.ObjectDetectorOptions(
+                base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
+                running_mode=mp.tasks.vision.RunningMode.IMAGE,
+                category_allowlist=["person"],
+                score_threshold=0.3,
+                max_results=50,
+            )
+            detector = mp.tasks.vision.ObjectDetector.create_from_options(options)
+            self._tls.person_detector = detector
+            with self._person_detectors_lock:
+                self._all_person_detectors.append(detector)
+        except Exception as e:
+            self.log_msg.emit(f"Failed to create MediaPipe ObjectDetector: {e}")
+            return None
+        return detector
+
+    def analyze_persons(self, cv_img):
+        """Detect people in an image. Returns int count (0 if detector unavailable)."""
+        detector = self._get_person_detector()
+        if detector is None:
+            return 0
+        try:
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv_img)
+            result = detector.detect(mp_image)
+            return len(result.detections or [])
+        except Exception:
+            return 0
+
     # -- fallback: YuNet face + Haar eyes -----------------------------------
     def _analyze_fallback(self, cv_img):
         faces = self._detect_faces_yunet(cv_img)
@@ -230,6 +282,7 @@ class QAAnalysisWorker(QThread):
         mask_enabled = self.settings.get("mask_enabled", True)
         face_enabled = self.settings.get("face_enabled", True)
         eyes_enabled = self.settings.get("eyes_enabled", True)
+        person_enabled = self.settings.get("person_enabled", True)
         res_threshold = self.settings.get("resolution_threshold", 512)
         blur_low = self.settings.get("blur_threshold_low", 50)
         blur_high = self.settings.get("blur_threshold_high", 500)
@@ -241,6 +294,7 @@ class QAAnalysisWorker(QThread):
             "has_mask": False, "mask_score": 1.0,
             "face_count": 0, "face_score": 1.0,
             "eyes_closed_count": 0, "eyes_score": 1.0,
+            "person_count": 0, "person_score": 1.0,
         }
 
         try:
@@ -277,6 +331,9 @@ class QAAnalysisWorker(QThread):
                     result["eyes_closed_count"] = eyes_closed
                     result["eyes_score"] = 0.0 if eyes_closed > 0 else 1.0
 
+            if person_enabled:
+                result["person_count"] = self.analyze_persons(cv_img)
+
         except Exception as e:
             self.log_msg.emit(f"Error analyzing {os.path.basename(img_path)}: {e}")
 
@@ -312,6 +369,14 @@ class QAAnalysisWorker(QThread):
             except Exception:
                 pass
         self._all_landmarkers.clear()
+
+        # Cleanup all per-thread MediaPipe object detectors
+        for det in self._all_person_detectors:
+            try:
+                det.close()
+            except Exception:
+                pass
+        self._all_person_detectors.clear()
 
         self.progress.emit(total, total)
         self.finished_analysis.emit()
@@ -442,6 +507,34 @@ class QATab(QWidget):
         self.chk_eyes.setToolTip("Detect closed eyes in detected faces (approximate heuristic)")
         settings_layout.addRow(self.chk_eyes)
 
+        # Person Detection
+        self.chk_person = QCheckBox("Person Detection")
+        self.chk_person.setChecked(True)
+        self.chk_person.setToolTip("Count people using MediaPipe EfficientDet-Lite2 (COCO). "
+                                   "Downloads a ~12 MB model on first use.")
+        if not _HAS_MEDIAPIPE:
+            self.chk_person.setChecked(False)
+            self.chk_person.setEnabled(False)
+            self.chk_person.setToolTip("Requires the 'mediapipe' package.")
+        settings_layout.addRow(self.chk_person)
+
+        person_mode_layout = QHBoxLayout()
+        self.radio_person_none = QRadioButton("No people")
+        self.radio_person_any = QRadioButton("Any people")
+        self.radio_person_multiple = QRadioButton("Multiple")
+        self.radio_person_multiple.setChecked(True)
+        self.radio_person_none.setToolTip("Bad score if no people detected")
+        self.radio_person_any.setToolTip("Bad score if 1+ people detected (only use images without people)")
+        self.radio_person_multiple.setToolTip("Bad score if 2+ people detected (filter out group shots)")
+        self.person_mode_group = QButtonGroup(self)
+        self.person_mode_group.addButton(self.radio_person_none, 0)
+        self.person_mode_group.addButton(self.radio_person_any, 1)
+        self.person_mode_group.addButton(self.radio_person_multiple, 2)
+        person_mode_layout.addWidget(self.radio_person_none)
+        person_mode_layout.addWidget(self.radio_person_any)
+        person_mode_layout.addWidget(self.radio_person_multiple)
+        settings_layout.addRow("  Flag:", person_mode_layout)
+
         left_layout.addWidget(settings_group)
 
         # -- Weights --
@@ -450,7 +543,7 @@ class QATab(QWidget):
         weights_layout.setContentsMargins(5, 10, 5, 5)
 
         self.weight_sliders = {}
-        for name, default in [("Blur", 10), ("Resolution", 5), ("Mask", 10), ("Face", 7), ("Eyes", 3)]:
+        for name, default in [("Blur", 10), ("Resolution", 5), ("Mask", 10), ("Face", 7), ("Eyes", 3), ("Person", 5)]:
             slider = QSlider(Qt.Horizontal)
             slider.setRange(0, 20)  # 0.0 to 2.0
             slider.setValue(default)
@@ -483,8 +576,8 @@ class QATab(QWidget):
         left_layout.addWidget(self.progress_bar)
 
         # -- Sorted Image Table --
-        self.COLUMN_KEYS = ["overall_score", "blur_score", "resolution_score", "mask_score", "face_score", "eyes_score"]
-        self.COLUMN_HEADERS = ["File", "Overall", "Blur", "Res", "Mask", "Face", "Eyes"]
+        self.COLUMN_KEYS = ["overall_score", "blur_score", "resolution_score", "mask_score", "face_score", "eyes_score", "person_score"]
+        self.COLUMN_HEADERS = ["File", "Overall", "Blur", "Res", "Mask", "Face", "Eyes", "Person"]
 
         self.tree_widget = QTreeWidget()
         self.tree_widget.setHeaderLabels(self.COLUMN_HEADERS)
@@ -544,6 +637,7 @@ class QATab(QWidget):
             ("Mask", "mask_score"),
             ("Face", "face_score"),
             ("Eyes", "eyes_score"),
+            ("Person", "person_score"),
         ]
         criterion_layout = QHBoxLayout()
         criterion_layout.addWidget(QLabel("Criterion:"))
@@ -634,6 +728,7 @@ class QATab(QWidget):
         self.lbl_detail_mask = QLabel("-")
         self.lbl_detail_face = QLabel("-")
         self.lbl_detail_eyes = QLabel("-")
+        self.lbl_detail_person = QLabel("-")
         self.lbl_detail_overall = QLabel("-")
         self.lbl_detail_overall.setStyleSheet("font-weight: bold; font-size: 14px;")
 
@@ -642,6 +737,7 @@ class QATab(QWidget):
         details_layout.addRow("Mask:", self.lbl_detail_mask)
         details_layout.addRow("Face:", self.lbl_detail_face)
         details_layout.addRow("Eyes:", self.lbl_detail_eyes)
+        details_layout.addRow("Person:", self.lbl_detail_person)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
@@ -721,6 +817,7 @@ class QATab(QWidget):
                     r.get("mask_score", -1),
                     r.get("face_score", -1),
                     r.get("eyes_score", -1),
+                    r.get("person_score", -1),
                 ]
                 for col, score in enumerate(scores, start=1):
                     if score < 0:
@@ -861,7 +958,8 @@ class QATab(QWidget):
     def update_detail_panel(self, f_path):
         if f_path not in self.analysis_results:
             for lbl in [self.lbl_detail_blur, self.lbl_detail_resolution, self.lbl_detail_mask,
-                        self.lbl_detail_face, self.lbl_detail_eyes, self.lbl_detail_overall]:
+                        self.lbl_detail_face, self.lbl_detail_eyes, self.lbl_detail_person,
+                        self.lbl_detail_overall]:
                 lbl.setText("-")
             return
 
@@ -900,6 +998,12 @@ class QATab(QWidget):
             self.lbl_detail_eyes.setText("N/A (no faces)")
         self.lbl_detail_eyes.setStyleSheet(f"color: {self._score_color(es)};")
 
+        # Person
+        pc = r.get("person_count", 0)
+        ps = r.get("person_score", 1.0)
+        self.lbl_detail_person.setText(f"{pc} person(s) detected  (score: {ps:.2f})")
+        self.lbl_detail_person.setStyleSheet(f"color: {self._score_color(ps)};")
+
         # Overall
         overall = r.get("overall_score", 0)
         self.lbl_detail_overall.setText(f"{overall:.2f}")
@@ -927,7 +1031,13 @@ class QATab(QWidget):
             "face_enabled": self.chk_face.isChecked(),
             "face_flag_mode": "not_detected" if self.radio_face_missing.isChecked() else "detected",
             "eyes_enabled": self.chk_eyes.isChecked(),
+            "person_enabled": self.chk_person.isChecked(),
+            "person_flag_mode": self._current_person_mode(),
         }
+
+    def _current_person_mode(self):
+        mode_id = self.person_mode_group.checkedId()
+        return {0: "none", 1: "any", 2: "multiple"}.get(mode_id, "multiple")
 
     def start_analysis(self):
         if not self.image_files:
@@ -970,6 +1080,17 @@ class QATab(QWidget):
             result["face_score"] = 1.0 if face_count > 0 else 0.0
         else:
             result["face_score"] = 0.0 if face_count > 0 else 1.0
+
+        # Compute person score based on mode
+        if settings.get("person_enabled", True):
+            person_count = result.get("person_count", 0)
+            mode = settings.get("person_flag_mode", "multiple")
+            if mode == "none":
+                result["person_score"] = 1.0 if person_count > 0 else 0.0
+            elif mode == "any":
+                result["person_score"] = 1.0 if person_count == 0 else 0.0
+            else:  # "multiple"
+                result["person_score"] = 1.0 if person_count <= 1 else 0.0
 
         # Compute overall score
         result["overall_score"] = self._compute_overall_score(result, settings)
@@ -1030,6 +1151,10 @@ class QATab(QWidget):
         if settings.get("eyes_enabled", True):
             weights["eyes"] = self.weight_sliders["eyes"].value() / 10.0
             scores["eyes"] = result.get("eyes_score", 1.0)
+
+        if settings.get("person_enabled", True):
+            weights["person"] = self.weight_sliders["person"].value() / 10.0
+            scores["person"] = result.get("person_score", 1.0)
 
         total_weight = sum(weights.values())
         if total_weight == 0:
@@ -1294,6 +1419,8 @@ class QATab(QWidget):
             "face_enabled": self.chk_face.isChecked(),
             "face_flag_mode": "not_detected" if self.radio_face_missing.isChecked() else "detected",
             "eyes_enabled": self.chk_eyes.isChecked(),
+            "person_enabled": self.chk_person.isChecked(),
+            "person_flag_mode": self._current_person_mode(),
             "weights": {k: s.value() for k, s in self.weight_sliders.items()},
             "append_text": self.txt_append.text(),
             "batch_criterion": self.combo_batch_criterion.currentIndex(),
@@ -1318,6 +1445,16 @@ class QATab(QWidget):
             else:
                 self.radio_face_missing.setChecked(True)
         if "eyes_enabled" in settings: self.chk_eyes.setChecked(settings["eyes_enabled"])
+        if "person_enabled" in settings and self.chk_person.isEnabled():
+            self.chk_person.setChecked(settings["person_enabled"])
+        if "person_flag_mode" in settings:
+            mode = settings["person_flag_mode"]
+            if mode == "none":
+                self.radio_person_none.setChecked(True)
+            elif mode == "any":
+                self.radio_person_any.setChecked(True)
+            else:
+                self.radio_person_multiple.setChecked(True)
         if "weights" in settings:
             for k, v in settings["weights"].items():
                 if k in self.weight_sliders:
