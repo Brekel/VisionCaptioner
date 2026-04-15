@@ -108,12 +108,27 @@ class SAM3Worker(QThread):
                     original_pil_img = Image.open(f_path)
                     original_pil_img = ImageOps.exif_transpose(original_pil_img)
                     original_pil_img = original_pil_img.convert("RGBA") # Use RGBA for all operations
-                    
+
                     bbox = mask_img.getbbox()
                     has_content = bbox is not None
-                    
+
                     if not has_content:
                         self.log_msg.emit("   -> ⚠️ Mask is empty.")
+                        if self.crop_to_mask:
+                            # Cropping was requested but there's nothing to crop to —
+                            # treat the image as unusable and move it to 'unused/'.
+                            original_pil_img.close()
+                            self._move_to_unused(f_path)
+                            # Skip saving mask / preview for this file.
+                            t1 = time.time()
+                            item_duration = t1 - t0
+                            if avg_speed == 0.0:
+                                avg_speed = item_duration
+                            else:
+                                avg_speed = (alpha * item_duration) + ((1 - alpha) * avg_speed)
+                            processed_count += 1
+                            self.progress.emit(processed_count, avg_speed)
+                            continue
 
                     # 2. Cropping Logic (Optional)
                     if self.crop_to_mask and has_content:
@@ -206,6 +221,10 @@ class SAM3Worker(QThread):
                     self.log_msg.emit(f"⚠️ Skipped {filename}: {msg}")
                 else:
                     self.log_msg.emit(f"❌ Failed {filename}: {msg}")
+                if self.crop_to_mask and "No detections" in msg:
+                    # Cropping was requested but nothing was detected —
+                    # treat the image as unusable and move it to 'unused/'.
+                    self._move_to_unused(f_path)
             
             # Speed Calculation
             t1 = time.time()
@@ -224,6 +243,34 @@ class SAM3Worker(QThread):
 
     def stop(self):
         self.is_running = False
+
+    def _move_to_unused(self, f_path):
+        """Move a source image (and sibling .txt caption, if any) to 'unused/'.
+
+        Used when cropping is requested but no mask/detection is available, so
+        the image would otherwise crop to nothing — we treat it as unusable.
+        """
+        try:
+            unused_dir = os.path.join(self.folder, "unused")
+            os.makedirs(unused_dir, exist_ok=True)
+
+            def _pick_dest(src_path):
+                dst = os.path.join(unused_dir, os.path.basename(src_path))
+                if os.path.exists(dst):
+                    stem, ext = os.path.splitext(dst)
+                    dst = f"{stem}_dup{ext}"
+                return dst
+
+            shutil.move(f_path, _pick_dest(f_path))
+
+            base = os.path.splitext(f_path)[0]
+            txt_path = base + ".txt"
+            if os.path.exists(txt_path):
+                shutil.move(txt_path, _pick_dest(txt_path))
+
+            self.log_msg.emit(f"   -> 🗑️ Moved '{os.path.basename(f_path)}' to 'unused/' (nothing to crop).")
+        except Exception as e:
+            self.log_msg.emit(f"   -> ❌ Could not move to 'unused/': {e}")
 
 
 class MaskTab(QWidget):

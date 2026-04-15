@@ -4,6 +4,7 @@ import gc
 import random
 import platform
 import datetime
+import shutil
 from PySide6.QtCore import QThread, Signal, QObject
 
 # --- SIGNALS ---
@@ -344,10 +345,13 @@ class CropWorker(QThread):
     finished = Signal()
     error = Signal(str)
 
-    def __init__(self, file_pairs, output_dir, ignore_no_mask=True):
+    def __init__(self, file_pairs, output_dir, unused_dir=None, ignore_no_mask=True):
         super().__init__()
         self.file_pairs = file_pairs # List of tuples: (image_path, mask_path_or_None, has_alpha)
         self.output_dir = output_dir
+        # Where to move images whose mask is empty (would crop to nothing).
+        # Defaults to a sibling 'unused' folder next to 'uncropped'.
+        self.unused_dir = unused_dir or os.path.join(os.path.dirname(output_dir), "unused")
         self.ignore_no_mask = ignore_no_mask
         self.is_running = True
         
@@ -424,7 +428,9 @@ class CropWorker(QThread):
                     # unless we want to extract it, but usually alpha crop just modifies the image.
 
             if not bbox:
-                return f"⚠️ Skipped (Empty Mask): {filename}"
+                # Nothing to crop to — move the image (and its mask / caption)
+                # to the 'unused' folder since the whole image is unusable.
+                return self._move_to_unused(f_path, mask_source, source_type, filename)
 
             # 3. Handle Backup & Crop
             
@@ -476,6 +482,38 @@ class CropWorker(QThread):
 
     def stop(self):
         self.is_running = False
+
+    def _move_to_unused(self, f_path, mask_source, source_type, filename):
+        """Move image + sibling caption + separate mask file to 'unused/'.
+
+        Used when a mask is empty and cropping would produce nothing — the whole
+        image is treated as unusable, mirroring the 'delete' behaviour in Review.
+        """
+        try:
+            os.makedirs(self.unused_dir, exist_ok=True)
+
+            def _pick_dest(src_path):
+                dst = os.path.join(self.unused_dir, os.path.basename(src_path))
+                if os.path.exists(dst):
+                    stem, ext = os.path.splitext(dst)
+                    dst = f"{stem}_dup{ext}"
+                return dst
+
+            shutil.move(f_path, _pick_dest(f_path))
+
+            # Move sibling caption if present.
+            base = os.path.splitext(f_path)[0]
+            txt_path = base + ".txt"
+            if os.path.exists(txt_path):
+                shutil.move(txt_path, _pick_dest(txt_path))
+
+            # Move separate mask file (file / subfolder modes) if present.
+            if source_type in ('file', 'subfolder') and mask_source and os.path.exists(mask_source):
+                shutil.move(mask_source, _pick_dest(mask_source))
+
+            return f"🗑️ Moved to 'unused/' (empty mask): {filename}"
+        except Exception as e:
+            return f"❌ Could not move {filename} to 'unused/': {e}"
 
 
 class LlamaCppInstallWorker(QThread):

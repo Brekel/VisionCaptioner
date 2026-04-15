@@ -132,7 +132,7 @@ class ReviewTab(QWidget):
         # Delete Button
         self.btn_delete = QPushButton("🗑️ Move to 'unused' Folder [DEL]")
         self.btn_delete.setToolTip("Move current image, text, and mask to /unused subfolder (Del)")
-        self.btn_delete.clicked.connect(self.delete_current_image)
+        self.btn_delete.clicked.connect(lambda: self.delete_current_image())
         left_layout.addWidget(self.btn_delete)
         
         # Undo Delete Button
@@ -951,7 +951,17 @@ class ReviewTab(QWidget):
             pil_mask = Image.fromarray(self.cv_mask)
             bbox = pil_mask.getbbox()
             if not bbox:
-                QMessageBox.warning(self, "Crop Error", "The current mask is empty. Cannot determine crop area.")
+                # Mask is empty — cropping would produce nothing. Treat the image
+                # as unusable and offer to move it to the 'unused' folder.
+                reply = QMessageBox.question(
+                    self,
+                    "Empty Mask",
+                    "The current mask is empty, so there is nothing to crop to.<br><br>"
+                    "Do you want to move this image to the <b>'unused'</b> folder instead?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    self.delete_current_image(skip_confirm=True)
                 return
         except Exception as e:
             QMessageBox.critical(self, "Crop Error", f"Could not process mask for cropping:\n{e}")
@@ -1043,7 +1053,7 @@ class ReviewTab(QWidget):
             self.log_msg.emit(f"❌ {error_msg}")
             QMessageBox.critical(self, "Crop Failed", error_msg)
 
-    def delete_current_image(self):
+    def delete_current_image(self, skip_confirm=False):
         """Moves the current image, mask, and caption to an 'unused' folder."""
         if self.current_index < 0 or self.current_index >= len(self.image_files):
             return
@@ -1056,13 +1066,13 @@ class ReviewTab(QWidget):
         # 1. Get paths and filename
         img_path = self.image_files[self.current_index]
         filename = os.path.basename(img_path)
-        
+
         base_path, ext = os.path.splitext(img_path)
         txt_path = base_path + ".txt"
         mask_path = base_path + "-masklabel.png"
 
         # 2. Ask the user for confirmation if needed
-        if self.chk_confirm_actions.isChecked():
+        if not skip_confirm and self.chk_confirm_actions.isChecked():
             reply = QMessageBox.question(
                 self, 
                 "Confirm Move", 
