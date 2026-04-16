@@ -597,15 +597,23 @@ class QwenEngine:
 
             if stop_event and stop_event(): return []
 
-            flat_image_inputs = [item for sublist in all_image_inputs if sublist for item in sublist]
-            flat_video_inputs = [item for sublist in all_video_inputs if sublist for item in sublist]
-            
-            if not flat_image_inputs: flat_image_inputs = None
-            if not flat_video_inputs: flat_video_inputs = None
+            if self.family.flatten_vision_inputs:
+                # Qwen-style: flat list of all images/videos across the batch.
+                final_image_inputs = [item for sublist in all_image_inputs if sublist for item in sublist]
+                final_video_inputs = [item for sublist in all_video_inputs if sublist for item in sublist]
+                if not final_image_inputs: final_image_inputs = None
+                if not final_video_inputs: final_video_inputs = None
+            else:
+                # Gemma 4-style: nested per-sample lists so the processor can pair
+                # each image list with the corresponding text prompt.
+                final_image_inputs = [sublist if sublist else [] for sublist in all_image_inputs]
+                final_video_inputs = [sublist if sublist else [] for sublist in all_video_inputs]
+                if not any(final_image_inputs): final_image_inputs = None
+                if not any(final_video_inputs): final_video_inputs = None
 
-            inputs = self.processor(text=texts, images=flat_image_inputs, videos=flat_video_inputs, padding="longest", return_tensors="pt").to(self.model.device)
+            inputs = self.processor(text=texts, images=final_image_inputs, videos=final_video_inputs, padding="longest", return_tensors="pt").to(self.model.device)
 
-            del all_image_inputs, all_video_inputs, flat_image_inputs, flat_video_inputs
+            del all_image_inputs, all_video_inputs, final_image_inputs, final_video_inputs
             gc.collect()
 
             stopping_criteria = None

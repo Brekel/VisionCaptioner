@@ -4,6 +4,8 @@ import inspect
 
 class BaseFamily:
 	name = "base"
+	# Whether the processor expects a flat image list (True) or nested per-sample lists (False).
+	flatten_vision_inputs = True
 
 	def processor_kwargs(self, max_resolution=768, vision_token_budget=None):
 		return {}
@@ -67,6 +69,9 @@ class QwenFamily(BaseFamily):
 
 class Gemma4Family(BaseFamily):
 	name = "gemma4"
+	# Gemma 4's processor needs nested per-sample image lists so it can pair
+	# each image with the correct text when expanding <image> placeholders.
+	flatten_vision_inputs = False
 
 	# Soft token budgets supported by Gemma 4's visual tower.
 	SUPPORTED_BUDGETS = (70, 140, 280, 560, 1120)
