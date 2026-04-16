@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QGroupBox, QSplitter, QSizePolicy, QApplication, QLineEdit,
                                QMessageBox, QGridLayout)
 from PySide6.QtCore import Qt, Signal, QByteArray
-from gui_widgets import ResizableImageLabel
+from gui_widgets import ResizableImageLabel, ShutdownCountdownDialog
 from gui_workers import ModelLoaderWorker, TestWorker, CaptionWorker, LlamaCppInstallWorker
 from gui_model_manager import ModelManagerDialog
 
@@ -161,6 +161,10 @@ class CaptionsTab(QWidget):
         self.chk_use_masks.setChecked(True)
         self.chk_use_masks.setToolTip("If checked, mask files (e.g. masklabel) will be applied to images before captioning.\nUncheck to always caption the full image.")
         left_layout.addWidget(self.chk_use_masks)
+
+        self.chk_shutdown = QCheckBox("Shutdown when done")
+        self.chk_shutdown.setToolTip("Shut down the computer after batch processing completes.\nA 60-second countdown allows you to cancel.")
+        left_layout.addWidget(self.chk_shutdown)
 
         left_layout.addSpacing(10)
         left_layout.addWidget(QLabel("Trigger Word (Optional):"))
@@ -451,6 +455,7 @@ class CaptionsTab(QWidget):
             "tokens": self.spin_tokens.value(),
             "skip_existing": self.chk_skip.isChecked(),
             "use_masks": self.chk_use_masks.isChecked(),
+            "shutdown_when_done": self.chk_shutdown.isChecked(),
             "trigger": self.txt_trigger.text(),
             "system_prompt_idx": self.combo_prompts.currentIndex(),
             "prompt_text": self.txt_prompt.toPlainText(),
@@ -486,6 +491,7 @@ class CaptionsTab(QWidget):
         if "tokens" in settings: self.spin_tokens.setValue(settings["tokens"])
         if "skip_existing" in settings: self.chk_skip.setChecked(settings["skip_existing"])
         if "use_masks" in settings: self.chk_use_masks.setChecked(settings["use_masks"])
+        if "shutdown_when_done" in settings: self.chk_shutdown.setChecked(settings["shutdown_when_done"])
         if "trigger" in settings: self.txt_trigger.setText(settings["trigger"])
         if "suffix" in settings: self.txt_suffix.setPlainText(settings["suffix"])
         
@@ -720,10 +726,19 @@ class CaptionsTab(QWidget):
         self.log_msg.emit(f"🧪 Test Sample: {os.path.basename(f)} (Time: {t:.2f}s)")
 
     def start_processing(self):
-        if not self.current_folder: 
+        if not self.current_folder:
             QMessageBox.warning(self, "No Folder Selected", "Please select an image folder first.")
             return
 
+        if self.chk_shutdown.isChecked():
+            ret = QMessageBox.warning(
+                self, "Shutdown When Done",
+                "Your computer will shut down when processing completes.\n\nAre you sure?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if ret != QMessageBox.Yes:
+                return
+
+        self._manual_stop = False
         self.toggle_ui(False)
         self.btn_stop.setEnabled(True)
         self.btn_unload.setEnabled(False) # Disable Unload
@@ -792,10 +807,11 @@ class CaptionsTab(QWidget):
             self.lbl_status.setText("Initializing...")
 
     def stop_processing(self):
+        self._manual_stop = True
         self.log_msg.emit("🛑 Stopping... Please wait for the current batch to finish.")
         self.lbl_status.setText("Stopping...")
         self.btn_stop.setEnabled(False) # Prevent double-clicking
-        if self.worker: 
+        if self.worker:
             self.worker.stop()
 
     def on_process_done(self, elapsed, speed):
@@ -805,3 +821,9 @@ class CaptionsTab(QWidget):
         self.lbl_status.setText(f"Complete. Total: {elapsed:.1f}s | Avg: {speed:.2f} s/item")
         self.log_msg.emit(f"Done. Total time: {elapsed:.2f}s")
         self.batch_finished.emit()
+
+        if self.chk_shutdown.isChecked() and not getattr(self, '_manual_stop', False):
+            self.log_msg.emit("Shutdown countdown started (60 s)...")
+            dlg = ShutdownCountdownDialog(seconds=60, parent=self)
+            if dlg.exec() == ShutdownCountdownDialog.Rejected:
+                self.log_msg.emit("Shutdown cancelled.")

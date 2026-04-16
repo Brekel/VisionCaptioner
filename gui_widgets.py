@@ -1,8 +1,62 @@
 import os
+import sys
+import subprocess
 import cv2
-from PySide6.QtWidgets import QLabel, QLineEdit
+from PySide6.QtWidgets import QLabel, QLineEdit, QDialog, QVBoxLayout, QPushButton
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QPixmap, QImage, QDragEnterEvent, QDropEvent, QImageReader, QPainter, QPen, QColor
+
+
+class ShutdownCountdownDialog(QDialog):
+    """Modal dialog that counts down before shutting the computer down."""
+
+    def __init__(self, seconds=60, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Shutdown")
+        self.setModal(True)
+        self.setFixedSize(340, 130)
+        self.remaining = seconds
+
+        layout = QVBoxLayout(self)
+        self.label = QLabel()
+        self.label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.label)
+
+        self.btn_cancel = QPushButton("Cancel Shutdown")
+        self.btn_cancel.clicked.connect(self._cancel)
+        layout.addWidget(self.btn_cancel)
+
+        self.timer = QTimer(self)
+        self.timer.setInterval(1000)
+        self.timer.timeout.connect(self._tick)
+
+        self._update_label()
+        self.timer.start()
+
+    def _update_label(self):
+        self.label.setText(f"Shutting down in {self.remaining} seconds...")
+
+    def _tick(self):
+        self.remaining -= 1
+        if self.remaining <= 0:
+            self.timer.stop()
+            self._do_shutdown()
+        else:
+            self._update_label()
+
+    def _cancel(self):
+        self.timer.stop()
+        self.reject()
+
+    def _do_shutdown(self):
+        if sys.platform == "win32":
+            subprocess.Popen(["shutdown", "/s", "/t", "0"])
+        elif sys.platform == "darwin":
+            subprocess.Popen(["osascript", "-e",
+                              'tell app "System Events" to shut down'])
+        else:
+            subprocess.Popen(["systemctl", "poweroff"])
+        self.accept()
 
 class DropLineEdit(QLineEdit):
     def __init__(self, parent=None):
