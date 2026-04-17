@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import re
 
 # === FAST IMPORTS (PySide6 core) - Load immediately for splash screen ===
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QCheckBox,
@@ -215,12 +216,49 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.main_splitter)
         # -----------------------------------
 
+    # Matches a tqdm-style progress bar: "42%|####   | 100/1000"
+    _TQDM_BAR_RE = re.compile(r'(\d+%)\|([^|\r\n]*)\|(\s*\d+/\d+)')
+
+    @classmethod
+    def _shrink_tqdm_bar(cls, text, bar_width=24):
+        def _sub(m):
+            bar = m.group(2)
+            if len(bar) <= bar_width:
+                return m.group(0)
+            fill = sum(1 for c in bar if not c.isspace())
+            ratio = fill / len(bar) if bar else 0
+            new_fill = int(round(bar_width * ratio))
+            new_bar = '#' * new_fill + ' ' * (bar_width - new_fill)
+            return f'{m.group(1)}|{new_bar}|{m.group(3)}'
+        return cls._TQDM_BAR_RE.sub(_sub, text)
+
     def write_to_log(self, text):
         # Move cursor to end to avoid inserting in middle if user clicked
         cursor = self.txt_log.textCursor()
         cursor.movePosition(QTextCursor.End)
+
+        # Honor carriage returns (\r) so tqdm-style progress bars overwrite
+        # the current line in place instead of piling up new lines. Also
+        # shrink overly wide tqdm bars so they fit the log widget.
+        i = 0
+        n = len(text)
+        while i < n:
+            ch = text[i]
+            if ch == '\r':
+                cursor.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
+                cursor.removeSelectedText()
+                i += 1
+            elif ch == '\n':
+                cursor.insertText('\n')
+                i += 1
+            else:
+                j = i
+                while j < n and text[j] != '\r' and text[j] != '\n':
+                    j += 1
+                cursor.insertText(self._shrink_tqdm_bar(text[i:j]))
+                i = j
+
         self.txt_log.setTextCursor(cursor)
-        self.txt_log.insertPlainText(text)
         self.txt_log.verticalScrollBar().setValue(self.txt_log.verticalScrollBar().maximum())
 
     def log(self, msg):

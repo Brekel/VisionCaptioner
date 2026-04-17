@@ -744,8 +744,16 @@ class SAM3Engine:
                 proc_img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
             
             # 3. Inference
-            inference_state = self.processor.set_image(proc_img)
-            output = self.processor.set_text_prompt(state=inference_state, prompt=prompt)
+            # SAM3 loads with mixed bf16/fp32 weights and expects autocast at call time;
+            # without it some Torch/CUDA combos raise "mat1 and mat2 must have the same dtype".
+            if self.device == "cuda":
+                autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            else:
+                import contextlib
+                autocast_ctx = contextlib.nullcontext()
+            with autocast_ctx:
+                inference_state = self.processor.set_image(proc_img)
+                output = self.processor.set_text_prompt(state=inference_state, prompt=prompt)
             
             masks = output.get("masks")
             scores = output.get("scores")

@@ -42,7 +42,10 @@
       "Bash(python -c \"import py_compile; py_compile.compile\\('backend.py', doraise=True\\); print\\('backend.py OK'\\)\")",
       "Bash(python -c \"import py_compile; py_compile.compile\\('gui_model_manager.py', doraise=True\\); print\\('OK'\\)\")",
       "Bash(python -c \"import py_compile; py_compile.compile\\('gui_model_manager.py', doraise=True\\); print\\('gui_model_manager.py OK'\\)\")",
-      "Bash(python -c \"import py_compile; py_compile.compile\\('backend.py', doraise=True\\); py_compile.compile\\('model_probe.py', doraise=True\\); print\\('Both OK'\\)\")"
+      "Bash(python -c \"import py_compile; py_compile.compile\\('backend.py', doraise=True\\); py_compile.compile\\('model_probe.py', doraise=True\\); print\\('Both OK'\\)\")",
+      "Bash(python -m py_compile backend.py tab_captions.py cli.py)",
+      "Bash(python -m py_compile tab_captions.py)",
+      "Bash(python -m py_compile tab_review.py)"
     ]
   }
 }
