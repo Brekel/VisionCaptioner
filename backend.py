@@ -760,8 +760,9 @@ class SAM3Engine:
             
             if masks is None: return None, "No masks returned"
             
-            if hasattr(masks, "cpu"): masks = masks.cpu().numpy()
-            if hasattr(scores, "cpu"): scores = scores.cpu().numpy()
+            # .float() before .numpy() — autocast can leave these as bfloat16, which numpy doesn't support
+            if hasattr(masks, "cpu"): masks = masks.float().cpu().numpy()
+            if hasattr(scores, "cpu"): scores = scores.float().cpu().numpy()
             
             if masks.size == 0: return None, "No masks found"
 
