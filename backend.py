@@ -290,6 +290,9 @@ class QwenEngine:
 
             # Family-specific processor kwargs
             proc_kwargs = self.family.processor_kwargs(max_resolution=max_resolution, vision_token_budget=vision_token_budget)
+            # use_fast=True is deprecated in favor of backend="torchvision", but the
+            # latter is forwarded to video sub-processors (e.g. Gemma4VideoProcessor)
+            # where `backend` is a read-only property and setattr raises.
             proc_kwargs.update({"trust_remote_code": True, "use_fast": True})
 
             try:

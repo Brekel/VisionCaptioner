@@ -72,7 +72,22 @@ class MainWindow(QMainWindow):
         
         sys.stdout = self.stdout_stream
         sys.stderr = self.stderr_stream
-        
+
+        # Repoint existing logging.StreamHandler instances that captured the
+        # original (possibly None under pythonw) streams before the swap.
+        # Without this, libraries like transformers crash emitting warnings
+        # because their handler's .stream is None.
+        import logging
+        _old_streams = {self._original_stdout, self._original_stderr, None}
+        for _name in [None, *logging.Logger.manager.loggerDict.keys()]:
+            _lg = logging.getLogger(_name)
+            if not isinstance(_lg, logging.Logger):
+                continue
+            for _h in _lg.handlers:
+                if isinstance(_h, logging.StreamHandler) and not isinstance(_h, logging.FileHandler):
+                    if getattr(_h, "stream", None) in _old_streams:
+                        _h.stream = self.stderr_stream
+
         self.load_settings()
         
         self.gpu_monitor = GPUMonitorWorker()
