@@ -186,7 +186,13 @@ class CaptionsTab(QWidget):
         self.txt_prompt = QTextEdit()
         self.txt_prompt.setPlainText("Analyze the image and write a single concise sentence that describes the main subject and setting. Keep it grounded in visible details only.")
         self.txt_prompt.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.txt_prompt.setToolTip("The main instruction given to the AI (e.g., 'Describe the image').")
+        self.txt_prompt.setToolTip(
+            "The main instruction given to the AI (e.g., 'Describe the image').\n"
+            "\n"
+            "LoRA training tip:\n"
+            "Describe what you want to be changeable.\n"
+            "Leave out (or use a trigger word for) what you want the LoRA to memorize."
+        )
         left_layout.addWidget(self.txt_prompt)
 
         left_layout.addSpacing(10)
