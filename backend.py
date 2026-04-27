@@ -167,7 +167,7 @@ class QwenEngine:
         
         return "Model unloaded. Memory cleared."
 
-    def load_model(self, model_path, quantization_type="None", max_resolution=512, attn_impl="sdpa", use_compile=False, vision_token_budget=None):
+    def load_model(self, model_path, quantization_type="None", max_resolution=512, attn_impl="sdpa", use_compile=False, vision_token_budget=None, media_mode="image"):
         try:
             from model_probe import ModelProbe
             
@@ -252,12 +252,21 @@ class QwenEngine:
                     print(f"   To enable vision, place an mmproj file next to the model and name it")
                     print(f"   to share the model name, e.g.: {model_base}-mmproj-BF16.gguf")
 
+                # Pick context window + prompt-ingest chunk based on the active media mode.
+                # n_ctx drives the KV-cache size and n_batch the prefill scratch buffer; both are
+                # the dominant VRAM consumers for GGUF on top of the weights themselves.
+                if media_mode == "video":
+                    n_ctx, n_batch = 32768, 2048
+                else:
+                    n_ctx, n_batch = 8192, 512
+                print(f"GGUF mode: {media_mode} -> n_ctx={n_ctx}, n_batch={n_batch}")
+
                 # Load Llama
                 try:
                     llm_kwargs = {
                         "model_path": model_path,
-                        "n_ctx": 32768,  # Large context needed for multi-frame video (each frame = many vision tokens)
-                        "n_batch": 8192, # Prompt-ingest chunk size. Large enough for ~8 video frames of Qwen-VL vision tokens while reclaiming scratch VRAM vs n_ctx-sized n_batch.
+                        "n_ctx": n_ctx,
+                        "n_batch": n_batch,
                         "n_gpu_layers": n_gpu_layers,
                         "verbose": False,
                         "chat_handler": chat_handler,
@@ -272,6 +281,7 @@ class QwenEngine:
                         msg += " (Vision Enabled)"
                     else:
                         msg += " (Text Only)"
+                    msg += f" — {media_mode} mode (n_ctx={n_ctx}, n_batch={n_batch})"
                     return True, msg
                     
                 except Exception as e:

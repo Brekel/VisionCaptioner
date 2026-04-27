@@ -326,15 +326,16 @@ class ScanWorker(QThread):
 
 class ModelLoaderWorker(QThread):
     finished = Signal(bool, str)
-    def __init__(self, engine, path, quant, res, attn_impl="sdpa", use_compile=False, vision_token_budget=None):
+    def __init__(self, engine, path, quant, res, attn_impl="sdpa", use_compile=False, vision_token_budget=None, media_mode="image"):
         super().__init__()
         self.engine, self.path, self.quant, self.res = engine, path, quant, res
         self.attn_impl = attn_impl
         self.use_compile = use_compile
         self.vision_token_budget = vision_token_budget
+        self.media_mode = media_mode
     def run(self):
         try:
-            success, msg = self.engine.load_model(self.path, self.quant, self.res, self.attn_impl, self.use_compile, vision_token_budget=self.vision_token_budget)
+            success, msg = self.engine.load_model(self.path, self.quant, self.res, self.attn_impl, self.use_compile, vision_token_budget=self.vision_token_budget, media_mode=self.media_mode)
             self.finished.emit(success, msg)
         except Exception as e:
             self.finished.emit(False, f"Critical Worker Error: {e}")

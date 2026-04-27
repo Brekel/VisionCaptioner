@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, Signal, QByteArray
 from gui_widgets import ResizableImageLabel, ShutdownCountdownDialog
 from gui_workers import ModelLoaderWorker, TestWorker, CaptionWorker, LlamaCppInstallWorker
 from gui_model_manager import ModelManagerDialog
+from file_utils import find_media_files, VIDEO_EXTS
 
 
 class CaptionsTab(QWidget):
@@ -514,6 +515,19 @@ class CaptionsTab(QWidget):
             try: self.splitter.restoreState(QByteArray.fromHex(settings["splitter_state"].encode()))
             except: pass
 
+    def _detect_media_mode(self):
+        # GGUF context sizing differs sharply between single images and multi-frame video,
+        # so we pre-scan the selected folder. Defaults to "image" when no folder is set
+        # or no videos are present — that's the cheaper KV-cache footprint.
+        folder = getattr(self, "current_folder", "") or ""
+        if not folder or not os.path.isdir(folder):
+            return "image"
+        try:
+            videos = find_media_files(folder, exts=VIDEO_EXTS, recursive=getattr(self, "recursive", False))
+        except Exception:
+            return "image"
+        return "video" if videos else "image"
+
     def load_model(self):
         self.toggle_ui(False)
         self.lbl_status.setText("Loading Model... Please Wait")
@@ -531,10 +545,11 @@ class CaptionsTab(QWidget):
         attn_impl = "sdpa"
         use_compile = False
         vision_tokens = self.combo_vis_tokens.currentData() if hasattr(self, 'combo_vis_tokens') else None
+        media_mode = self._detect_media_mode()
 
         self.log_msg.emit(f"⏳ Loading model: {model_name}...")
 
-        self.loader_worker = ModelLoaderWorker(self.engine, path, quant, res, attn_impl, use_compile, vision_token_budget=vision_tokens)
+        self.loader_worker = ModelLoaderWorker(self.engine, path, quant, res, attn_impl, use_compile, vision_token_budget=vision_tokens, media_mode=media_mode)
         self.loader_worker.finished.connect(self.on_model_loaded)
         self.loader_worker.start()
 

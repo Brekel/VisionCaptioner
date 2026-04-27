@@ -212,7 +212,11 @@ def main():
         
         print(f"✅ Found {len(all_pairs)} files to process.")
 
-        success, msg = engine.load_model(model_path, quantization_type=args.quant, max_resolution=args.res, vision_token_budget=args.vision_tokens)
+        video_exts_set = tuple(e.lstrip("*").lower() for e in VIDEO_EXTS)
+        has_video = any(f.lower().endswith(video_exts_set) for f, _ in all_pairs)
+        media_mode = "video" if has_video else "image"
+
+        success, msg = engine.load_model(model_path, quantization_type=args.quant, max_resolution=args.res, vision_token_budget=args.vision_tokens, media_mode=media_mode)
         if not success:
             print(f"❌ Model Load Failed: {msg}")
             return
