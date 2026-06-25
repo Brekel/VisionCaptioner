@@ -31,3 +31,8 @@ opencv-python<4.10
 
 # Install SAM3 directly from source
 git+https://github.com/facebookresearch/sam3.git
+
+# Optional: TwelveLabs Pegasus cloud captioning backend (--backend pegasus).
+# Lightweight, no GPU/torch needed. Uncomment to enable, or:
+#   pip install "twelvelabs>=1.2.8"
+# twelvelabs>=1.2.8

@@ -93,7 +93,30 @@ These arguments control the captioning model for text generation. Both **Qwen-VL
 
 --trigger
     A specific word or phrase to prepend to the start of every output caption.
+
+--backend
+    Which captioning backend to use.
+    Options:
+      local   - Local Qwen-VL / Gemma 4 models (default, runs on your GPU).
+      pegasus - TwelveLabs Pegasus, a cloud video-understanding model that
+                watches the whole clip instead of a few extracted frames.
+                Video files only; requires the TWELVELABS_API_KEY environment
+                variable. Get a free key at https://twelvelabs.io
+    Default: local
+
+--tl-model
+    TwelveLabs Pegasus model name (only used with --backend pegasus).
+    Default: pegasus1.5
 ```
+
+> **TwelveLabs Pegasus backend (optional):** install the SDK with
+> `pip install "twelvelabs>=1.2.8"` and set `TWELVELABS_API_KEY`. Because
+> Pegasus is video-native it analyzes motion and the sequence of events, which
+> is often a better fit for captioning video training data than frame
+> sampling. It captions video files only; route images through the local
+> backend. `--quant`, `--res`, `--vision-tokens`, `--frame-count` and
+> `--batch-size` are ignored in this mode. `--max-tokens` is clamped up to the
+> model minimum (512) if you pass a smaller value.
 
 ### Captioning Examples
 
@@ -115,6 +138,13 @@ python cli.py --folder "C:/Images/Dataset" --skip-existing
 **Example D: Caption with Gemma 4 at high detail**
 ```bash
 python cli.py --folder "C:/Images/Dataset" --model Gemma-4-E2B-it --vision-tokens 560
+```
+
+**Example E: Caption videos with the TwelveLabs Pegasus cloud backend**
+```bash
+export TWELVELABS_API_KEY="tlk_..."   # get a free key at https://twelvelabs.io
+python cli.py --folder "C:/Videos/Dataset" --backend pegasus \
+    --prompt "Describe the action and motion in this video." --max-tokens 512
 ```
 
 ---

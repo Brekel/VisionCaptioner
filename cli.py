@@ -120,6 +120,8 @@ def main():
 
     # Captioning Config (Qwen)
     grp_cap = parser.add_argument_group("Captioning Arguments")
+    grp_cap.add_argument("--backend", type=str, default="local", choices=["local", "pegasus"], help="Caption backend: 'local' (Qwen/Gemma, default) or 'pegasus' (TwelveLabs cloud video model; needs TWELVELABS_API_KEY).")
+    grp_cap.add_argument("--tl-model", type=str, default="pegasus1.5", help="TwelveLabs Pegasus model name (used with --backend pegasus).")
     grp_cap.add_argument("--model", type=str, help="Path to Qwen model.")
     grp_cap.add_argument("--quant", type=str, default=defaults.get("quant", "None"), choices=["None", "FP16", "Int8", "NF4"], help="Quantization level.")
     grp_cap.add_argument("--res", type=int, default=defaults.get("res", 512), help="Max resolution for captioning.")
@@ -169,6 +171,56 @@ def main():
     # ==============================================================================
     # MODE: CAPTION
     # ==============================================================================
+    if args.mode == "caption" and args.backend == "pegasus":
+        from pegasus_backend import PegasusEngine
+
+        final_prompt = args.prompt
+        if args.suffix.strip():
+            final_prompt += "\n" + args.suffix
+
+        print(f"\n🚀 --- VisionCaptioner CLI (Caption Mode / TwelveLabs Pegasus) ---")
+        print(f"📁 Folder:   {args.folder}")
+        print(f"☁️  Model:    {args.tl_model}")
+        print(f"📝 Prompt:   {final_prompt[:50]}...")
+        if args.skip_existing:
+            print("⏩ Skipping existing .txt files.")
+        print("-" * 40)
+
+        engine = PegasusEngine(model_name=args.tl_model)
+        success, msg = engine.load_model()
+        if not success:
+            print(f"❌ Backend init failed: {msg}")
+            return
+
+        print("🔍 Scanning folder...")
+        all_pairs = engine.find_files(args.folder, skip_existing=args.skip_existing, recursive=args.recursive)
+        if not all_pairs:
+            print("❌ No files found (or all skipped).")
+            return
+        print(f"✅ Found {len(all_pairs)} files to process.")
+
+        with tqdm(total=len(all_pairs), unit="file") as pbar:
+            for f_path, _ in all_pairs:
+                captions = engine.generate_batch(
+                    [f_path],
+                    prompt_text=final_prompt,
+                    trigger_word=args.trigger,
+                    max_tokens=args.max_tokens,
+                    log_callback=lambda m: pbar.write(m),
+                )
+                cap = captions[0] if captions else "Error: no result"
+                if not ("Error:" in cap or "[Video Load Error]" in cap):
+                    txt_path = os.path.splitext(f_path)[0] + ".txt"
+                    with open(txt_path, "w", encoding="utf-8") as fh:
+                        fh.write(cap)
+                else:
+                    pbar.write(f"⚠️  Skipped {os.path.basename(f_path)}: {cap}")
+                pbar.update(1)
+
+        engine.unload_model()
+        print("\n✅ Done.")
+        return
+
     if args.mode == "caption":
         # ... (Same as existing code)
         model_path = None
