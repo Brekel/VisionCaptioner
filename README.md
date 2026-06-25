@@ -20,6 +20,7 @@ Built specifically for AI researchers and enthusiasts training custom models (Lo
     *   **System Prompts:** Choose from built-in presets (tuned for various models) or write your own custom instructions.
     *   **Resolution & Quantization:** Adjustable settings to balance between speed, VRAM usage, and descriptive detail.
     *   **Works with many Vision-Language models** Qwen2.5-VL, Qwen3-VL, Google Gemma 4 (E2B/E4B/26B-A4B/31B), base models, Abliterated versions, GGUF models (Qwen only for now)
+    *   **Optional cloud video backend (TwelveLabs Pegasus):** for video datasets you can opt into `--backend pegasus`, a video-native model that watches the whole clip (motion & sequence of events) instead of sampling frames. Needs no GPU; just set `TWELVELABS_API_KEY` ([free key](https://twelvelabs.io)). See [commandline_interface.md](commandline_interface.md).
 *   **Masking Support:** Functionality to create mask files using Segment Anything 3 model with promptable subject.
     *   **Editing** Functionality to quickly paint/edit/extract/contract masks in a visual editor.
     *   **Different mask formats** Masks can be saved as separate files or embedded in the image files.
