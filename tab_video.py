@@ -590,7 +590,27 @@ class VideoTab(QWidget):
         out_layout.addWidget(self.chk_save_img)
         out_layout.addWidget(self.chk_save_mask)
         settings_layout.addWidget(out_group)
-        
+
+        settings_layout.addSpacing(10)
+
+        # Single-frame grab: exports just the frame currently shown in the
+        # preview (scrub the timeline to pick it), reusing the prompt / mask /
+        # crop / output settings above. Lives here rather than next to the
+        # timeline for discoverability.
+        self.btn_grab_frame = QPushButton("Grab Current Frame (G)")
+        self.btn_grab_frame.setFixedHeight(34)
+        self.btn_grab_frame.setEnabled(False)
+        self.btn_grab_frame.setToolTip(
+            "Export only the frame currently shown in the preview.\n"
+            "Scrub the timeline to the exact moment you want, then grab it.\n"
+            "Uses the same prompt, mask, crop and output settings as bulk extraction."
+        )
+        self.btn_grab_frame.setStyleSheet("QPushButton { background-color: #d6a316; color: white; font-weight: bold; border-radius: 4px; padding: 0 10px; } QPushButton:hover:!disabled { background-color: #c49515; } QPushButton:disabled { background-color: #555; color: #888; }")
+        self.btn_grab_frame.clicked.connect(self.grab_current_frame)
+        self.shortcut_grab = QShortcut(QKeySequence("G"), self)
+        self.shortcut_grab.activated.connect(self.grab_current_frame)
+        settings_layout.addWidget(self.btn_grab_frame)
+
         settings_layout.addStretch()
         left_layout.addWidget(settings_group)
         
@@ -614,16 +634,6 @@ class VideoTab(QWidget):
         self.btn_play_preview.setEnabled(False)
         self.btn_play_preview.clicked.connect(self.toggle_playback)
         slider_layout.addWidget(self.btn_play_preview)
-
-        # Grab Frame Button
-        self.btn_grab_frame = QPushButton("Grab Frame (G)")
-        self.btn_grab_frame.setFixedHeight(30)
-        self.btn_grab_frame.setEnabled(False)
-        self.btn_grab_frame.setStyleSheet("QPushButton { background-color: #d6a316; color: white; font-weight: bold; border-radius: 4px; padding: 0 10px; } QPushButton:hover:!disabled { background-color: #c49515; } QPushButton:disabled { background-color: #555; color: #888; }")
-        self.btn_grab_frame.clicked.connect(self.grab_current_frame)
-        self.shortcut_grab = QShortcut(QKeySequence("G"), self)
-        self.shortcut_grab.activated.connect(self.grab_current_frame)
-        slider_layout.addWidget(self.btn_grab_frame)
 
         self.lbl_time = QLabel("00:00:00")
         self.slider = QSlider(Qt.Horizontal)
