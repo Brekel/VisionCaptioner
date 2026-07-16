@@ -96,6 +96,16 @@ class CaptionsTab(QWidget):
             "Int8: ~50% VRAM usage, excellent quality. (CUDA Only)\n"
             "NF4: ~25% VRAM usage, good quality. (CUDA Only)"
         )
+        # Int8/NF4 use BitsAndBytes, which is CUDA-only. Off CUDA (MPS/CPU) the
+        # backend loads full precision instead, so disable those entries there.
+        if getattr(self.engine, "device", "cpu") != "cuda":
+            model = self.combo_quant.model()
+            for idx in range(self.combo_quant.count()):
+                text = self.combo_quant.itemText(idx)
+                if text.startswith("Int8") or text.startswith("NF4"):
+                    item = model.item(idx)
+                    item.setEnabled(False)
+                    item.setToolTip("CUDA only (BitsAndBytes).")
         grid_model.addWidget(self.combo_quant, 1, 0)
 
         grid_model.addWidget(QLabel("Max Resolution:"), 0, 1)

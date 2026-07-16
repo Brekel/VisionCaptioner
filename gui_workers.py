@@ -1,8 +1,10 @@
 import os
+import re
 import time
 import gc
 import random
 import platform
+import subprocess
 import datetime
 import shutil
 from PySide6.QtCore import QThread, Signal, QObject
@@ -21,8 +23,13 @@ class GPUMonitorWorker(QThread):
     stats_update = Signal(float, float, float, int, bool)
 
     def run(self):
-        is_supported = platform.system() in ["Windows", "Linux"]
-        if not is_supported:
+        system = platform.system()
+
+        if system == "Darwin":
+            self._run_macos()
+            return
+
+        if system not in ["Windows", "Linux"]:
             self.stats_update.emit(0, 0, 0, 0, False)
             return
 
@@ -62,6 +69,65 @@ class GPUMonitorWorker(QThread):
             pynvml.nvmlShutdown()
         except:
             self.stats_update.emit(0, 0, 0, 0, False)
+
+    def _run_macos(self):
+        """Apple Silicon: report system-wide unified-memory usage (unified memory
+        is shared CPU/GPU, so this reflects real GPU pressure). No per-core GPU
+        utilisation is available without sudo powermetrics."""
+        try:
+            import torch
+            has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        except Exception:
+            has_mps = False
+
+        if not has_mps:
+            self.stats_update.emit(0, 0, 0, 0, False)
+            return
+
+        try:
+            total_bytes = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+        except (ValueError, OSError, AttributeError):
+            self.stats_update.emit(0, 0, 0, 0, False)
+            return
+
+        total_gb = total_bytes / (1024 ** 3)
+        alpha = 0.2
+        smoothed_mem = 0.0
+
+        while not self.isInterruptionRequested():
+            used_bytes = self._macos_used_bytes()
+            if used_bytes is not None:
+                used_gb = used_bytes / (1024 ** 3)
+                cur_mem = (used_bytes / total_bytes) * 100 if total_bytes else 0.0
+                smoothed_mem = (cur_mem * alpha) + (smoothed_mem * (1 - alpha))
+
+                # core_pct = -1 flags "no GPU-utilisation source" (needs sudo
+                # powermetrics on Apple Silicon); the UI shows it as N/A.
+                self.stats_update.emit(used_gb, total_gb, smoothed_mem, -1, True)
+            self.msleep(250)
+
+    @staticmethod
+    def _macos_used_bytes():
+        """System-wide 'Memory Used' via vm_stat: active + wired + compressed
+        pages (matches Activity Monitor). Returns bytes, or None on failure."""
+        try:
+            out = subprocess.check_output(["vm_stat"], text=True, timeout=2)
+        except Exception:
+            return None
+        m = re.search(r"page size of (\d+) bytes", out)
+        try:
+            page = int(m.group(1)) if m else os.sysconf("SC_PAGE_SIZE")
+        except (ValueError, OSError, AttributeError):
+            return None
+
+        def pages(label):
+            mm = re.search(rf"{re.escape(label)}:\s+(\d+)\.", out)
+            return int(mm.group(1)) if mm else 0
+
+        active = pages("Pages active")
+        wired = pages("Pages wired down")
+        compressed = pages("Pages occupied by compressor")
+        return (active + wired + compressed) * page
 
 class TestWorker(QThread):
     result_ready = Signal(str, str, float) 

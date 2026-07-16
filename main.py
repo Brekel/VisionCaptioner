@@ -190,9 +190,9 @@ class MainWindow(QMainWindow):
             QProgressBar { border: 1px solid #555; border-radius: 4px; text-align: center; background-color: #333; color: white; font-weight: bold; }
             QProgressBar::chunk { background-color: #a15f13; width: 20px; }
         """
-        self.bar_vram = QProgressBar(); self.bar_vram.setStyleSheet(bar_style); self.bar_vram.setFormat("VRAM: %v GB")
+        self.bar_vram = QProgressBar(); self.bar_vram.setStyleSheet(bar_style); self.bar_vram.setFormat("GPU Mem: %v GB")
         self.bar_gpu = QProgressBar(); self.bar_gpu.setStyleSheet(bar_style); self.bar_gpu.setFormat("Core: %p%")
-        stats_layout.addWidget(QLabel("VRAM:")); stats_layout.addWidget(self.bar_vram)
+        stats_layout.addWidget(QLabel("GPU Mem:")); stats_layout.addWidget(self.bar_vram)
         stats_layout.addWidget(QLabel("GPU Load:")); stats_layout.addWidget(self.bar_gpu)
         bottom_layout.addWidget(stats_group)
 
@@ -359,10 +359,14 @@ class MainWindow(QMainWindow):
 
     def update_gpu_stats(self, used_gb, total_gb, vram_pct, core_pct, available):
         if not available:
-            self.bar_vram.setFormat("No NVIDIA GPU"); self.bar_vram.setValue(0); self.bar_gpu.setValue(0); return
+            self.bar_vram.setFormat("GPU N/A"); self.bar_vram.setValue(0); self.bar_gpu.setValue(0); return
         self.bar_vram.setMaximum(int(total_gb * 100)); self.bar_vram.setValue(int(used_gb * 100))
-        self.bar_vram.setFormat(f"VRAM: {used_gb:.1f} GB / {total_gb:.1f} GB ({int(vram_pct)}%)")
-        self.bar_gpu.setValue(int(core_pct)); self.bar_gpu.setFormat(f"GPU Load: {int(core_pct)}%")
+        self.bar_vram.setFormat(f"GPU Mem: {used_gb:.1f} GB / {total_gb:.1f} GB ({int(vram_pct)}%)")
+        if core_pct < 0:
+            # Utilisation unavailable (e.g. Apple Silicon without sudo powermetrics)
+            self.bar_gpu.setValue(0); self.bar_gpu.setFormat("GPU Load: N/A")
+        else:
+            self.bar_gpu.setValue(int(core_pct)); self.bar_gpu.setFormat(f"GPU Load: {int(core_pct)}%")
 
     def play_notification(self):
         if self.chk_sound.isChecked():

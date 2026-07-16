@@ -38,6 +38,7 @@ Built specifically for AI researchers and enthusiasts training custom models (Lo
 *   **Python 3.10+**
 *   **NVIDIA GPU** (with CUDA).
 *   **AMD GPU** (with ROCm on Linux)
+*   **Apple Silicon Mac** (M-series, with Metal / MPS)
 
 ### Linux Setup
 
@@ -73,6 +74,22 @@ pip install -r requirements.txt
 
 ***AMD GPU with ROCm support for Windows, more info here:***
 https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html
+
+### macOS Setup (Apple Silicon)
+
+Runs on M-series Macs using Metal / MPS. Install the default PyTorch wheels (they ship MPS support, so there is **no** CUDA index URL):
+```bash
+git clone https://github.com/Brekel/VisionCaptioner.git
+cd VisionCaptioner
+python3 -m venv venv
+source venv/bin/activate
+pip install torch torchvision
+pip install -r requirements.txt
+```
+Notes:
+* NVIDIA/CUDA-only packages (`bitsandbytes`, `nvidia-ml-py`, `triton`) are skipped automatically on macOS, so the Int8/NF4 quantization options are unavailable (the app loads full precision instead). Use `None (BF16)` or FP16, or a GGUF model.
+* Transformers models run on MPS. For **GGUF** models, use the built-in installer on the Captions tab (📥 button): it fetches a prebuilt **Metal** `llama-cpp-python` wheel (`pip install llama-cpp-python` does not work — see [readme_models.md](readme_models.md)).
+* Launch with `python main.py` or `./run.sh`.
 
 
 ## Update
