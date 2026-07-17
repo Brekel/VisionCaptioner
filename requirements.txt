@@ -18,7 +18,6 @@ qwen-vl-utils
 nvidia-ml-py; sys_platform != 'darwin'
 tqdm
 einops
-decord
 pycocotools
 mediapipe
 triton-windows; sys_platform == 'win32'
