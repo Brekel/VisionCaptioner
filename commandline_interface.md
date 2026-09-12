@@ -60,8 +60,14 @@ These arguments control the captioning model for text generation. Both **Qwen-VL
     Options: None, FP16, FP8, Int8, NF4
     Default: None
     FP8 needs an NVIDIA GPU with compute capability 8.9 or newer
-    (RTX 4090 and up) plus the `kernels` package. If either is missing
-    the model loads unquantized and the log says why.
+    (RTX 4090 and up) plus the optional `kernels` package, which is not
+    installed by default:
+
+        pip install "kernels<0.15"
+
+    Keep that upper bound - 0.15+ breaks `import transformers` outright.
+    If the GPU or the package is missing, the model loads unquantized
+    and the log says which one was the problem.
     Only the language model is quantized; the vision and audio towers
     stay at full precision to protect caption quality.
 

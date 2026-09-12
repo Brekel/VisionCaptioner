@@ -10,12 +10,19 @@ pillow
 sentencepiece
 protobuf
 bitsandbytes; sys_platform != 'darwin'
-# FP8 quantization: transformers pulls its FP8 matmul kernel from the Hub
-# through this package. Without it FP8 is greyed out in the GUI (the model
-# would load fine and then fail in the first forward pass). Capped below
-# 0.15 because 0.15+ changed the LayerRepository constructor in a way that
-# breaks `import transformers` on the 5.x line entirely, not just FP8.
-kernels>=0.10.2,<0.15; sys_platform != 'darwin'
+# OPTIONAL, not installed by default: the FP8 quantization option needs the
+# `kernels` package, which is how transformers fetches the FP8 matmul kernel
+# from the Hub. Without it FP8 is greyed out in the GUI and the tooltip says
+# so; every other quantization option is unaffected. To enable FP8:
+#
+#     pip install "kernels<0.15"
+#
+# Mind that upper bound. kernels 0.15+ requires LayerRepository to be built
+# with a revision or a version, transformers 5.x passes neither, and the
+# resulting ValueError fires at `import transformers.activations` - which
+# breaks the whole app at import, not just FP8. Left out of the install list
+# because it pulls ~20 transitive packages for one option that NF4 beats on
+# both VRAM and speed wherever DeepGEMM has no build (Windows today).
 PySide6
 matplotlib
 tiktoken

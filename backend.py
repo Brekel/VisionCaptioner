@@ -146,7 +146,7 @@ def fp8_unsupported_reason():
     except Exception as ex:
         return f"GPU probe failed ({ex})"
     if not has_fp8_kernels():
-        return 'the `kernels` package is missing (pip install "kernels<0.15")'
+        return 'the `kernels` package is missing - pip install "kernels<0.15"'
     return ""
 
 

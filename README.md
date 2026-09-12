@@ -91,6 +91,7 @@ pip install -r requirements.txt
 ```
 Notes:
 * NVIDIA/CUDA-only packages (`bitsandbytes`, `nvidia-ml-py`, `triton`) are skipped automatically on macOS, so the Int8/NF4 quantization options are unavailable (the app loads full precision instead). Use `None (BF16)` or FP16, or a GGUF model.
+* The **FP8** quantization option is off by default: it needs an NVIDIA GPU with compute capability 8.9+ (RTX 4090 or newer) and the optional `kernels` package (`pip install "kernels<0.15"` - 0.15+ breaks `import transformers`). Without either, FP8 is greyed out and the tooltip says why. On Windows it is slower than both `None (BF16)` and NF4, because the fast FP8 kernel (DeepGEMM) has no Windows build; prefer NF4 for VRAM savings.
 * Transformers models run on MPS. For **GGUF** models, use the built-in installer on the Captions tab (📥 button): it fetches a prebuilt **Metal** `llama-cpp-python` wheel (`pip install llama-cpp-python` does not work — see [readme_models.md](readme_models.md)).
 * Launch with `python main.py` or `./run.sh`.
 
