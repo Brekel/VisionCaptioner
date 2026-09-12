@@ -80,5 +80,21 @@ If you prefer to install manually:
 ### GGUF Model Notes
 * Make sure you download the GGUF version of the model and don't forget the accompanying mmproj file.
 
+### Vision projector (mmproj) files
+A GGUF that has no vision tensors of its own needs a separate **mmproj** (multimodal projector) file to see images. There is no setting for it — **just put the mmproj file in the same folder as the model** and VisionCaptioner finds it:
+
+* Any file in that folder matching `*mmproj*.gguf` is a candidate, whatever it is called. The generic names the model publishers ship (`mmproj-F16.gguf`, `mmproj-BF16.gguf`) are fine.
+* The right one is picked by reading its metadata: a projector fits only if `clip.vision.projection_dim` equals the model's own embedding width. So a folder holding projectors for several models still pairs each one correctly, and a projector belonging to a different model is rejected rather than loaded.
+* Filenames are only used to break a tie between projectors that are all a valid fit.
+
+Check the log after loading a model — it says which projector was chosen, and the load message ends in **(Vision Enabled)**:
+
+```
+✅ Projector matched on projection_dim=2560: mmproj-F16.gguf
+GGUF Loaded ✅ (Vision Enabled) — image mode (n_ctx=8192, n_batch=512)
+```
+
+If it says **(Text Only)** instead, no projector was paired and every caption will be invented from the prompt alone. The log above it says why — either no `*mmproj*.gguf` was found in the folder, or the ones there project a different width and belong to another model.
+
 ### Gemma 4 GGUF
 Gemma 4 GGUF models (e.g. from `unsloth/gemma-4-*-GGUF`) are supported and require llama-cpp-python **v0.3.35 or newer** from [JamePeng/llama-cpp-python](https://github.com/JamePeng/llama-cpp-python/releases). Older versions do not include the Gemma4ChatHandler and will show an error asking you to update. The Vision Token Budget setting does not apply to GGUF models — it is automatically greyed out. Thinking mode is handled internally by the chat handler.

@@ -394,8 +394,9 @@ class TestFindMatchingMmproj:
         assert result is None
 
     def test_skip_tokens_excluded(self, tmp_path):
-        """Tokens like 'gguf', 'mmproj', 'q4', 'f16', 'model' are excluded from scoring.
-        When all shared tokens are in the skip set, overlap score is 0 and no match is returned."""
+        """Tokens like 'gguf', 'mmproj', 'q4', 'f16', 'model' are excluded from scoring,
+        but a lone candidate is still returned - a 0 score means "no evidence either way",
+        not "wrong file" (issue #13)."""
         main = tmp_path / "model-f16.gguf"
         main.write_bytes(b"x")
         # The only shared tokens are 'model' and 'f16' which are in the skip set
@@ -403,8 +404,89 @@ class TestFindMatchingMmproj:
         mmproj.write_bytes(b"x")
 
         result = ModelProbe.find_matching_mmproj(str(main))
-        # Score stays 0 (never exceeds best_score=0) so no match returned
+        assert result == str(mmproj)
+
+    def test_generic_mmproj_name_accepted(self, tmp_path):
+        """Regression for issue #13: Unsloth ships the Gemma 4 projector as a bare
+        'mmproj-F16.gguf', which shares no scoring token with the model filename."""
+        main = tmp_path / "gemma-4-E4B-it-Q8_0.gguf"
+        main.write_bytes(b"x")
+        mmproj = tmp_path / "mmproj-F16.gguf"
+        mmproj.write_bytes(b"x")
+
+        result = ModelProbe.find_matching_mmproj(str(main))
+        assert result == str(mmproj)
+
+    def test_quant_suffix_alone_does_not_match(self, tmp_path):
+        """A shared quant suffix ('q8', '0') is not identity - it once paired a Qwen
+        projector with a Gemma model."""
+        main = tmp_path / "gemma-4-E2B-it-Q8_0.gguf"
+        main.write_bytes(b"x")
+        wrong = tmp_path / "Qwen3-VL-8B-Caption-V4.5.mmproj-Q8_0.gguf"
+        wrong.write_bytes(b"x")
+        right = tmp_path / "gemma-4-E2B-it-mmproj-BF16.gguf"
+        right.write_bytes(b"x")
+
+        result = ModelProbe.find_matching_mmproj(str(main))
+        assert result == str(right)
+
+    def test_projection_dim_beats_filename(self, tmp_path, monkeypatch):
+        """clip.vision.projection_dim must equal the model's embedding_length, so it
+        decides even when a mismatched projector has the better filename overlap."""
+        main = tmp_path / "gemma-4-E2B-it-Q8_0.gguf"
+        main.write_bytes(b"x")
+        wrong = tmp_path / "gemma-4-E2B-it-mmproj-Q8_0.gguf"   # perfect name, wrong width
+        wrong.write_bytes(b"x")
+        right = tmp_path / "mmproj-BF16.gguf"                  # no name overlap, right width
+        right.write_bytes(b"x")
+
+        dims = {str(wrong): 5376, str(right): 1536}
+        monkeypatch.setattr(ModelProbe, "_projector_dim", staticmethod(lambda p: dims.get(p)))
+
+        result = ModelProbe.find_matching_mmproj(str(main), main_embd=1536)
+        assert result == str(right)
+
+    def test_projection_dim_mismatch_rejects_all(self, tmp_path, monkeypatch):
+        """A projector of the wrong width is worse than none - llama.cpp would load it
+        and emit garbage."""
+        main = tmp_path / "gemma-4-E2B-it-Q8_0.gguf"
+        main.write_bytes(b"x")
+        wrong = tmp_path / "gemma-4-E2B-it-mmproj-BF16.gguf"
+        wrong.write_bytes(b"x")
+
+        monkeypatch.setattr(ModelProbe, "_projector_dim", staticmethod(lambda p: 4096))
+
+        result = ModelProbe.find_matching_mmproj(str(main), main_embd=1536)
         assert result is None
+
+    def test_untyped_projector_falls_back_to_names(self, tmp_path, monkeypatch):
+        """Projectors whose width cannot be read stay in the running, scored by name."""
+        main = tmp_path / "qwen3-vl-8b-instruct.gguf"
+        main.write_bytes(b"x")
+        good = tmp_path / "qwen3-vl-8b-instruct-mmproj.gguf"
+        good.write_bytes(b"x")
+        weak = tmp_path / "llava-mmproj.gguf"
+        weak.write_bytes(b"x")
+
+        monkeypatch.setattr(ModelProbe, "_projector_dim", staticmethod(lambda p: None))
+
+        result = ModelProbe.find_matching_mmproj(str(main), main_embd=4096)
+        assert result == str(good)
+
+    def test_main_embd_argument_avoids_reread(self, tmp_path, monkeypatch):
+        """The caller (_probe_gguf) already has the model open, so it passes the width in."""
+        main = tmp_path / "model.gguf"
+        main.write_bytes(b"x")
+        mmproj = tmp_path / "mmproj.gguf"
+        mmproj.write_bytes(b"x")
+
+        def boom(path):
+            raise AssertionError("_model_embd should not be called when main_embd is given")
+
+        monkeypatch.setattr(ModelProbe, "_model_embd", staticmethod(boom))
+        monkeypatch.setattr(ModelProbe, "_projector_dim", staticmethod(lambda p: 2560))
+
+        assert ModelProbe.find_matching_mmproj(str(main), main_embd=2560) == str(mmproj)
 
     def test_skip_tokens_dont_affect_real_overlap(self, tmp_path):
         """Non-skip tokens still contribute to matching even when skip tokens are present."""
@@ -484,6 +566,7 @@ class TestCache:
         cache = {
             abs_path: {
                 "_mtime": mtime,
+                "_v": ModelProbe.CACHE_VERSION,
                 "backend": "cached_backend",
                 "format": "cached"
             }
@@ -507,6 +590,61 @@ class TestCache:
 
         result = ModelProbe.probe(str(model_dir), cache=cache)
         assert result["backend"] == "qwen_hf"  # freshly probed
+
+    def test_probe_uses_cache_when_mmproj_signature_matches(self, tmp_path):
+        model = tmp_path / "model.gguf"
+        model.write_bytes(b"x")
+        (tmp_path / "model-mmproj.gguf").write_bytes(b"x")
+
+        abs_path = os.path.abspath(str(model))
+        cache = {
+            abs_path: {
+                "_mtime": os.path.getmtime(abs_path),
+                "_v": ModelProbe.CACHE_VERSION,
+                "_mmproj_sig": ModelProbe._mmproj_signature(abs_path),
+                "backend": "cached_backend",
+            }
+        }
+
+        assert ModelProbe.probe(str(model), cache=cache)["backend"] == "cached_backend"
+
+    def test_probe_reprobes_when_mmproj_added(self, tmp_path):
+        """Dropping a projector beside a model does not touch the model's own mtime,
+        so the projector listing is fingerprinted separately (issue #13)."""
+        model = tmp_path / "model.gguf"
+        model.write_bytes(b"x")
+
+        abs_path = os.path.abspath(str(model))
+        cache = {
+            abs_path: {
+                "_mtime": os.path.getmtime(abs_path),
+                "_v": ModelProbe.CACHE_VERSION,
+                "_mmproj_sig": [],          # cached before the projector arrived
+                "backend": "cached_backend",
+            }
+        }
+        (tmp_path / "model-mmproj.gguf").write_bytes(b"x")
+
+        result = ModelProbe.probe(str(model), cache=cache)
+        assert result.get("backend") != "cached_backend"   # stale entry not reused
+
+    def test_probe_ignores_entries_from_an_older_cache_version(self, tmp_path):
+        """Entries written before the mmproj pairing changed must not be trusted."""
+        model_dir = tmp_path / "cached-model"
+        model_dir.mkdir()
+        (model_dir / "config.json").write_text(json.dumps({"model_type": "qwen2_5_vl"}))
+
+        abs_path = os.path.abspath(str(model_dir))
+        cache = {
+            abs_path: {
+                "_mtime": os.path.getmtime(abs_path),
+                "backend": "stale_backend",      # no "_v": pre-versioning entry
+            }
+        }
+
+        result = ModelProbe.probe(str(model_dir), cache=cache)
+        assert result["backend"] == "qwen_hf"                     # freshly probed
+        assert cache[abs_path]["_v"] == ModelProbe.CACHE_VERSION  # rewritten
 
     def test_probe_nonexistent_path(self):
         result = ModelProbe.probe("/totally/fake/path")

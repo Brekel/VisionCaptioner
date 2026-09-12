@@ -18,6 +18,9 @@ class ModelProbe:
     """
     
     CACHE_FILE = "model_cache.json"
+    # Bumped whenever probing changes what it records, so entries written by an
+    # older build are re-probed instead of trusted. v2: metadata-based mmproj pairing.
+    CACHE_VERSION = 2
 
     @staticmethod
     def load_cache():
@@ -52,9 +55,14 @@ class ModelProbe:
         if cache is not None:
             if path in cache:
                 cached_data = cache[path]
-                # Check if file has been modified since cache
-                if cached_data.get("_mtime") == mtime:
-                    return cached_data
+                # Check if file has been modified since cache, and whether the
+                # projectors beside it still look the same (their mtimes are not
+                # reflected in the model's own).
+                if cached_data.get("_mtime") == mtime and \
+                   cached_data.get("_v") == ModelProbe.CACHE_VERSION:
+                    sig = cached_data.get("_mmproj_sig")
+                    if sig is None or sig == ModelProbe._mmproj_signature(path):
+                        return cached_data
 
         result = {}
         if os.path.isdir(path):
@@ -67,6 +75,7 @@ class ModelProbe:
         # Update Cache
         if cache is not None and "error" not in result:
             result["_mtime"] = mtime
+            result["_v"] = ModelProbe.CACHE_VERSION
             cache[path] = result
             
         return result
@@ -131,6 +140,47 @@ class ModelProbe:
             return {"error": f"Failed to parse config.json: {e}"}
 
     @staticmethod
+    def _gguf_field(reader, name):
+        """Raw first value of a GGUF metadata field, or None if absent/unreadable."""
+        for field in reader.fields.values():
+            if field.name != name:
+                continue
+            try:
+                val = field.parts[field.data[0]]
+                if hasattr(val, "tolist"):
+                    val = val.tolist()
+                return val
+            except Exception:
+                return None
+        return None
+
+    @staticmethod
+    def _gguf_str(reader, name):
+        """String metadata value. Strings arrive as a list of byte values."""
+        val = ModelProbe._gguf_field(reader, name)
+        if val is None:
+            return None
+        try:
+            if isinstance(val, list):
+                val = bytes([b for b in val if b != 0]).decode("utf-8", errors="ignore")
+            elif hasattr(val, "decode"):
+                val = val.decode("utf-8", errors="ignore")
+        except Exception:
+            return None
+        return str(val).strip("\0")
+
+    @staticmethod
+    def _gguf_int(reader, name):
+        """Integer metadata value (GGUF wraps scalars in a 1-element array)."""
+        val = ModelProbe._gguf_field(reader, name)
+        if isinstance(val, list):
+            val = val[0] if val else None
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _probe_gguf(file_path):
         """
         Inspects a GGUF file header.
@@ -160,28 +210,11 @@ class ModelProbe:
             
             res["unified_vision"] = has_vision_tensors
             
-            # Architecture Metadata
-            for field in reader.fields.values():
-                if field.name == "general.architecture":
-                    try:
-                        val = field.parts[field.data[0]]
-                        
-                        # Handle numpy arrays (common in gguf lib)
-                        if hasattr(val, "tolist"):
-                             val = val.tolist()
-                             
-                        # Fix for raw list of ints (ASCII)
-                        if isinstance(val, list):
-                             # Clean up 0 padding if present
-                             val = bytes([b for b in val if b != 0]).decode('utf-8', errors='ignore')
-                        elif hasattr(val, "decode"):
-                            val = val.decode('utf-8', errors='ignore')
-                            
-                        res["architecture"] = str(val).strip('\0')
-                    except Exception as e:
-                        # Keep silent on decoding errors, fallback logic handles it
-                        pass
-            
+            # Architecture Metadata (silent on decoding errors, fallback logic handles it)
+            arch = ModelProbe._gguf_str(reader, "general.architecture")
+            if arch:
+                res["architecture"] = arch
+
             if res["architecture"] == "unknown":
                 fname_lower = os.path.basename(file_path).lower()
                 if "qwen" in fname_lower:
@@ -193,7 +226,12 @@ class ModelProbe:
                 res["backend"] = "gemma_gguf"
             
             if not has_vision_tensors:
-                res["mmproj_detected"] = ModelProbe.find_matching_mmproj(file_path)
+                # The width the text model expects from a projector; the pairing key.
+                embd = ModelProbe._gguf_int(reader, f"{res['architecture']}.embedding_length")
+                res["mmproj_detected"] = ModelProbe.find_matching_mmproj(file_path, main_embd=embd)
+                # Projectors live beside the model, and dropping one in does not touch
+                # the model's own mtime, so the cache needs its own fingerprint for them.
+                res["_mmproj_sig"] = ModelProbe._mmproj_signature(file_path)
 
             return res
 
@@ -201,11 +239,48 @@ class ModelProbe:
             return {"error": f"GGUF Probe failed: {e}"}
 
     @staticmethod
-    def find_matching_mmproj(main_gguf_path):
+    def _mmproj_signature(main_gguf_path):
+        """Fingerprint of the projector files sitting beside a model."""
+        folder = os.path.dirname(main_gguf_path)
+        sig = []
+        for p in sorted(glob.glob(os.path.join(folder, "*mmproj*.gguf"))):
+            try:
+                sig.append(f"{os.path.basename(p)}:{os.path.getmtime(p)}")
+            except OSError:
+                sig.append(os.path.basename(p))
+        return sig
+
+    @staticmethod
+    def _projector_dim(mmproj_path):
+        """Width this projector outputs; must equal the text model's embedding_length."""
+        if not HAS_GGUF:
+            return None
+        try:
+            reader = gguf.GGUFReader(mmproj_path, mode='r')
+            return ModelProbe._gguf_int(reader, "clip.vision.projection_dim")
+        except Exception:
+            return None
+
+    @staticmethod
+    def _model_embd(main_gguf_path):
+        """Embedding width of a text GGUF, read through its own architecture prefix."""
+        if not HAS_GGUF:
+            return None
+        try:
+            reader = gguf.GGUFReader(main_gguf_path, mode='r')
+            arch = ModelProbe._gguf_str(reader, "general.architecture")
+            if not arch:
+                return None
+            return ModelProbe._gguf_int(reader, f"{arch}.embedding_length")
+        except Exception:
+            return None
+
+    @staticmethod
+    def find_matching_mmproj(main_gguf_path, main_embd=None):
         folder = os.path.dirname(main_gguf_path)
         filename = os.path.basename(main_gguf_path)
         base_name = os.path.splitext(filename)[0]
-        
+
         candidates = glob.glob(os.path.join(folder, "*mmproj*.gguf"))
         if not candidates:
             print(f"ℹ️ No *mmproj*.gguf files found in {folder}")
@@ -213,11 +288,46 @@ class ModelProbe:
             print(f"  Name it to share the model name, e.g.: {base_name}-mmproj-BF16.gguf")
             return None
 
+        # Pair on metadata before filenames: a projector fits only if the width it
+        # outputs (clip.vision.projection_dim) equals the model's embedding_length.
+        # That survives generic names like "mmproj-BF16.gguf" and rejects a projector
+        # belonging to another model that merely shares a quant suffix.
+        if main_embd is None:
+            main_embd = ModelProbe._model_embd(main_gguf_path)
+
+        if main_embd:
+            typed = [(c, ModelProbe._projector_dim(c)) for c in candidates]
+            mismatched = [(c, d) for c, d in typed if d is not None and d != main_embd]
+            exact = [c for c, d in typed if d == main_embd]
+            unknown = [c for c, d in typed if d is None]
+
+            if not exact and not unknown:
+                print(f"⚠️ No *mmproj*.gguf in {folder} projects to {main_embd} dims — vision unavailable.")
+                for c, d in mismatched:
+                    print(f"  ✗ {os.path.basename(c)}: projects {d}-d")
+                print(f"  Download the projector built for {filename}.")
+                return None
+
+            candidates = exact or unknown
+            if exact and len(exact) == 1:
+                print(f"✅ Projector matched on projection_dim={main_embd}: {os.path.basename(exact[0])}")
+                if mismatched:
+                    print(f"  ({len(mismatched)} other projector(s) here project a different width)")
+                return exact[0]
+            if not exact:
+                print(f"ℹ️ Could not read clip.vision.projection_dim from any projector here;"
+                      f" falling back to filename matching.")
+
+        # Several (or untyped) candidates left - fall back to filename overlap.
         best_match = None
-        best_score = 0
+        best_score = -1   # a lone candidate scoring 0 still wins; 0 would reject it
 
         main_tokens = set(re.split(r'[._-]', base_name.lower()))
-        skip = {'gguf', 'mmproj', 'q4', 'k', 'm', 'f16', 'model', 'lora'}
+        # Quant/format tokens carry no identity - "q8"/"0" alone once paired a Qwen
+        # projector with a Gemma model.
+        skip = {'gguf', 'mmproj', 'model', 'lora',
+                'q2', 'q3', 'q4', 'q5', 'q6', 'q8', 'f16', 'f32', 'bf16',
+                'k', 's', 'm', 'l', '0', '1'}
 
         scored = []
         for cand in candidates:
@@ -234,7 +344,7 @@ class ModelProbe:
                 best_match = cand
 
         # Log matching details so user can verify or fix naming
-        if len(scored) > 1 or (best_match and best_score < 2):
+        if len(scored) > 1 or best_score < 2:
             scored.sort(key=lambda x: x[0], reverse=True)
             print(f"ℹ️ mmproj candidates for {filename}:")
             for sc, name, _ in scored:
