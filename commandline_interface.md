@@ -57,8 +57,27 @@ These arguments control the captioning model for text generation. Both **Qwen-VL
 
 --quant
     Quantization level to control VRAM usage.
-    Options: None, FP16, Int8, NF4
+    Options: None, FP16, FP8, Int8, NF4
     Default: None
+    FP8 needs an NVIDIA GPU with compute capability 8.9 or newer
+    (RTX 4090 and up) plus the `kernels` package. If either is missing
+    the model loads unquantized and the log says why.
+    Only the language model is quantized; the vision and audio towers
+    stay at full precision to protect caption quality.
+
+    On Windows, expect FP8 to be SLOWER than both None and NF4.
+    The fast FP8 matmul (DeepGEMM) has no Windows build, so it runs on
+    a Triton fallback. Measured on an RTX 5090, Qwen3-VL-2B, 512px,
+    128 tokens, best of three after warmup:
+
+        None  4.26 GB   5.95 s
+        FP8   2.86 GB  13.38 s
+        Int8  2.46 GB  17.52 s
+        NF4   1.59 GB   7.25 s
+
+    So FP8 is worth choosing only over Int8. If you want VRAM savings
+    with speed, use NF4; if you want speed, use None. FP8's case is
+    8-bit weight fidelity, which NF4's 4-bit cannot match.
 
 --res
     Maximum image resolution (side length). Used by Qwen models.

@@ -19,6 +19,17 @@ class TestParseQuantString:
     def test_fp16_bare(self):
         assert parse_quant_string("FP16") == "FP16"
 
+    def test_fp8(self):
+        assert parse_quant_string("FP8 (8-bit, Ada+)") == "FP8"
+
+    def test_fp8_bare(self):
+        assert parse_quant_string("FP8") == "FP8"
+
+    def test_fp16_not_read_as_fp8(self):
+        # "FP16" contains no "FP8" substring, but the two checks sit next to
+        # each other, so pin the distinction rather than trust the ordering.
+        assert parse_quant_string("FP16 (Half Precision)") == "FP16"
+
     def test_int8(self):
         assert parse_quant_string("Int8 (8-bit)") == "Int8"
 

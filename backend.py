@@ -21,6 +21,12 @@ except ImportError:
     HAS_BNB = False
 
 try:
+    from transformers import FineGrainedFP8Config
+    HAS_FP8 = True
+except ImportError:
+    HAS_FP8 = False
+
+try:
     import flash_attn
     HAS_FLASH_ATTN = True
 except ImportError:
@@ -84,6 +90,94 @@ def get_torch_device():
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+# FP8 (e4m3) needs native tensor-core support: compute capability >= 8.9, meaning
+# Ada (RTX 4090) or newer. On older cards transformers does not fail - it logs a
+# warning and silently dequantizes back to bf16 - so check up front and tell the
+# user, rather than reporting "FP8 Loaded" over a model that is running bf16.
+FP8_MIN_CAPABILITY = (8, 9)
+
+# Quantize the language model only, keeping the vision/audio towers, their
+# projectors and lm_head in bf16 - the standard VLM FP8 recipe. The towers are
+# small next to the LM, so quantizing them saves little VRAM while caption
+# quality is visibly sensitive to it. These patterns are matched against full
+# module names by transformers' should_convert_module, which anchors re.match at
+# the start of the name, hence the leading ".*" on anything nested.
+FP8_SKIP_MODULES = [
+    "lm_head",                  # supplying our own list drops transformers' default skips
+    ".*visual",                 # Qwen2.5-VL / Qwen3-VL tower, merger, deepstack mergers
+    ".*vision_tower",           # Gemma 4, Gemma 3
+    ".*audio_tower",            # Gemma 4 audio path
+    ".*multi_modal_projector",  # Gemma 3 style projector
+    ".*embed_vision",           # Gemma 4 vision embedding projection
+    ".*embed_audio",            # Gemma 4 audio embedding projection
+]
+
+
+def has_fp8_kernels():
+    """
+    True if the Triton kernel behind FP8 can be imported.
+
+    FP8 weights are matmul'd by a kernel that transformers pulls from the Hub
+    via the `kernels` package. Without it the model still *loads* clean and
+    then every caption dies in the first forward pass, so this has to gate
+    availability, not just report it. `kernels` >= 0.15 constructs
+    LayerRepository differently than transformers 5.x expects and breaks
+    `import transformers` outright, hence the upper bound in requirements.txt.
+    """
+    try:
+        import kernels  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def fp8_unsupported_reason():
+    """Why FP8 cannot run here, or "" if it can."""
+    if not HAS_FP8:
+        return "transformers is too old (no FineGrainedFP8Config)"
+    try:
+        if not torch.cuda.is_available():
+            return "no CUDA GPU"
+        cap = torch.cuda.get_device_capability()
+        if cap < FP8_MIN_CAPABILITY:
+            return f"GPU compute capability is {cap[0]}.{cap[1]}, FP8 needs >= 8.9 (RTX 4090 or newer)"
+    except Exception as ex:
+        return f"GPU probe failed ({ex})"
+    if not has_fp8_kernels():
+        return 'the `kernels` package is missing (pip install "kernels<0.15")'
+    return ""
+
+
+def fp8_supported():
+    """True if FP8 weight quantization can actually run on this machine."""
+    return fp8_unsupported_reason() == ""
+
+
+def _disable_deepgemm_probe_on_windows():
+    """
+    Keep FP8 matmul on the Triton path on Windows.
+
+    transformers tries DeepGEMM first whenever the weight block size is
+    128x128, and its probe reads the CUDA runtime version through
+    ctypes.CDLL("libcudart.so") - a Linux-only library name. The dispatch in
+    w8a8_fp8_matmul catches only ImportError, so on Windows that probe raises an
+    uncaught FileNotFoundError and every FP8 generation dies. It only bites on
+    Hopper/Blackwell: an Ada card fails the SM90 check earlier and falls back
+    cleanly. Marking the probe as already-attempted-and-failed makes
+    _load_deepgemm_kernel raise the ImportError the dispatch expects, landing on
+    the Triton kernel - which is where Windows ends up anyway, since DeepGEMM
+    ships no Windows build.
+    """
+    if platform.system() != "Windows":
+        return
+    try:
+        from transformers.integrations import finegrained_fp8 as fp8_mod
+    except Exception:
+        return
+    if getattr(fp8_mod, "_deepgemm_available", False) is None:
+        fp8_mod._deepgemm_available = False
 
 
 class QwenEngine:
@@ -335,8 +429,9 @@ class QwenEngine:
                 # many Qwen/Gemma VLMs are bf16-native and float16 overflows to NaN on MPS.
                 torch_dtype = torch.bfloat16
             
-            # Quantization (BitsAndBytes)
+            # Quantization (BitsAndBytes / FP8)
             quant_config = None
+            quant_note = ""
             if quantization_type in ["Int8", "NF4"]:
                 if self.device == "cuda" and HAS_BNB:
                      if quantization_type == "Int8":
@@ -345,6 +440,15 @@ class QwenEngine:
                          quant_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch_dtype, bnb_4bit_use_double_quant=True)
                 else:
                      print(f"⚠️ Quantization {quantization_type} not supported on {self.device}")
+            elif quantization_type == "FP8":
+                fp8_reason = fp8_unsupported_reason()
+                if not fp8_reason:
+                    _disable_deepgemm_probe_on_windows()
+                    quant_config = FineGrainedFP8Config(modules_to_not_convert=FP8_SKIP_MODULES)
+                    quant_note = "FP8 (language model only)"
+                else:
+                    quant_note = f"FP8 unavailable ({fp8_reason}), loaded unquantized"
+                print(quant_note if quant_config else f"⚠️ {quant_note}")
 
             # Load Arguments
             load_args = {
@@ -372,6 +476,8 @@ class QwenEngine:
                     pass
 
             self.model.eval()
+            if quant_note:
+                return True, f"HF Model Loaded ({backend_type}) — {quant_note}"
             return True, f"HF Model Loaded ({backend_type})"
 
         except Exception as e:

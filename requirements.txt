@@ -10,6 +10,12 @@ pillow
 sentencepiece
 protobuf
 bitsandbytes; sys_platform != 'darwin'
+# FP8 quantization: transformers pulls its FP8 matmul kernel from the Hub
+# through this package. Without it FP8 is greyed out in the GUI (the model
+# would load fine and then fail in the first forward pass). Capped below
+# 0.15 because 0.15+ changed the LayerRepository constructor in a way that
+# breaks `import transformers` on the 5.x line entirely, not just FP8.
+kernels>=0.10.2,<0.15; sys_platform != 'darwin'
 PySide6
 matplotlib
 tiktoken

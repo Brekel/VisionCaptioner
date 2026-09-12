@@ -10,7 +10,7 @@ from PIL import Image as PILImage
 import numpy as np
 import cv2
 
-from backend import QwenEngine
+from backend import QwenEngine, FP8_SKIP_MODULES, fp8_supported, fp8_unsupported_reason
 
 
 # ===========================================================================
@@ -423,3 +423,74 @@ class TestGetDeviceType:
 
         engine = self._make_engine_raw()
         assert engine.get_device_type() == "cpu"
+
+# ===========================================================================
+# TestFp8Availability
+# ===========================================================================
+class TestFp8Availability:
+    """Tests for the FP8 capability gate and its module skip list."""
+
+    def test_unsupported_without_cuda(self):
+        # The torch stub reports no CUDA, so FP8 must report itself unusable
+        # rather than let a load silently fall back to bf16.
+        assert fp8_supported() is False
+        assert fp8_unsupported_reason() != ''
+
+    def test_reason_is_empty_when_supported(self):
+        with patch('backend.HAS_FP8', True), \
+             patch('backend.has_fp8_kernels', return_value=True), \
+             patch('backend.torch') as mock_torch:
+            mock_torch.cuda.is_available.return_value = True
+            mock_torch.cuda.get_device_capability.return_value = (8, 9)
+            assert fp8_unsupported_reason() == ''
+
+    def test_capability_below_threshold_is_rejected(self):
+        # Ampere (8.6) must be refused: transformers would quietly dequantize.
+        with patch('backend.HAS_FP8', True), \
+             patch('backend.has_fp8_kernels', return_value=True), \
+             patch('backend.torch') as mock_torch:
+            mock_torch.cuda.is_available.return_value = True
+            mock_torch.cuda.get_device_capability.return_value = (8, 6)
+            assert '8.6' in fp8_unsupported_reason()
+
+    def test_missing_kernels_is_rejected(self):
+        # Without the kernel the model loads fine and then dies on the first
+        # forward pass, so this has to gate availability up front.
+        with patch('backend.HAS_FP8', True), \
+             patch('backend.has_fp8_kernels', return_value=False), \
+             patch('backend.torch') as mock_torch:
+            mock_torch.cuda.is_available.return_value = True
+            mock_torch.cuda.get_device_capability.return_value = (12, 0)
+            assert 'kernels' in fp8_unsupported_reason()
+
+    def test_skip_list_covers_both_families(self):
+        # Patterns are matched against full module names, so each must survive
+        # the nesting these models actually use.
+        import re
+        names = [
+            "model.visual.blocks.0.attn.qkv",                      # Qwen3-VL
+            "model.visual.merger.linear_fc1",                      # Qwen3-VL
+            "model.vision_tower.encoder.layers.0.mlp.up_proj.linear",  # Gemma 4
+            "model.audio_tower.layers.0.self_attn.q_proj.linear",  # Gemma 4
+            "model.embed_vision.embedding_projection",             # Gemma 4
+            "lm_head",
+        ]
+        for name in names:
+            matched = any(
+                re.match(rf"{key}\.", name) or re.match(key, name) or name.endswith(key)
+                for key in FP8_SKIP_MODULES
+            )
+            assert matched, f"{name} would be quantized"
+
+    def test_skip_list_leaves_language_model_quantized(self):
+        import re
+        names = [
+            "model.language_model.layers.0.self_attn.q_proj",
+            "model.language_model.layers.0.mlp.down_proj",
+        ]
+        for name in names:
+            matched = any(
+                re.match(rf"{key}\.", name) or re.match(key, name) or name.endswith(key)
+                for key in FP8_SKIP_MODULES
+            )
+            assert not matched, f"{name} would be skipped"

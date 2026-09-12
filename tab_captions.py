@@ -11,6 +11,7 @@ from gui_widgets import ResizableImageLabel, ShutdownCountdownDialog
 from gui_workers import ModelLoaderWorker, TestWorker, CaptionWorker, LlamaCppInstallWorker
 from gui_model_manager import ModelManagerDialog
 from file_utils import find_media_files, VIDEO_EXTS
+from backend import fp8_supported, fp8_unsupported_reason
 
 
 class CaptionsTab(QWidget):
@@ -89,10 +90,11 @@ class CaptionsTab(QWidget):
         # Row 1: Quantization & Resolution
         grid_model.addWidget(QLabel("Quantization:"), 0, 0)
         self.combo_quant = QComboBox()
-        self.combo_quant.addItems(["None (BF16 - Default)", "FP16 (Half Precision)", "Int8 (BitsAndBytes)", "NF4 (4-bit)"])
+        self.combo_quant.addItems(["None (BF16 - Default)", "FP16 (Half Precision)", "FP8 (8-bit, Ada+)", "Int8 (BitsAndBytes)", "NF4 (4-bit)"])
         self.combo_quant.setToolTip(
             "None: Native quality (BF16).\n"
             "FP16: Slightly less VRAM on older cards.\n"
+            "FP8: ~33% less VRAM, 8-bit weights. Faster than Int8, but slower than BF16 and NF4. (RTX 4090 or newer)\n"
             "Int8: ~50% VRAM usage, excellent quality. (CUDA Only)\n"
             "NF4: ~25% VRAM usage, good quality. (CUDA Only)"
         )
@@ -106,6 +108,20 @@ class CaptionsTab(QWidget):
                     item = model.item(idx)
                     item.setEnabled(False)
                     item.setToolTip("CUDA only (BitsAndBytes).")
+        # FP8 additionally needs compute capability >= 8.9 (Ada or newer) and
+        # the kernel package. Below that transformers quietly dequantizes to
+        # bf16, so grey the entry out rather than let a silent fallback look
+        # like it applied - and report the actual reason, since a capability
+        # message on a 4090 that is merely missing `kernels` sends the user
+        # hunting for a new GPU.
+        fp8_reason = fp8_unsupported_reason()
+        if fp8_reason:
+            model = self.combo_quant.model()
+            for idx in range(self.combo_quant.count()):
+                if self.combo_quant.itemText(idx).startswith("FP8"):
+                    item = model.item(idx)
+                    item.setEnabled(False)
+                    item.setToolTip(f"FP8 unavailable: {fp8_reason}.")
         grid_model.addWidget(self.combo_quant, 1, 0)
 
         grid_model.addWidget(QLabel("Max Resolution:"), 0, 1)

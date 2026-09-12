@@ -15,6 +15,7 @@ def parse_quant_string(q_str):
     """Maps the verbose GUI quantization string to the CLI short code."""
     if not isinstance(q_str, str): return "None"
     if "FP16" in q_str: return "FP16"
+    if "FP8" in q_str: return "FP8"
     if "Int8" in q_str: return "Int8"
     if "NF4" in q_str: return "NF4"
     return "None"
@@ -121,7 +122,7 @@ def main():
     # Captioning Config (Qwen)
     grp_cap = parser.add_argument_group("Captioning Arguments")
     grp_cap.add_argument("--model", type=str, help="Path to Qwen model.")
-    grp_cap.add_argument("--quant", type=str, default=defaults.get("quant", "None"), choices=["None", "FP16", "Int8", "NF4"], help="Quantization level.")
+    grp_cap.add_argument("--quant", type=str, default=defaults.get("quant", "None"), choices=["None", "FP16", "FP8", "Int8", "NF4"], help="Quantization level.")
     grp_cap.add_argument("--res", type=int, default=defaults.get("res", 512), help="Max resolution for captioning.")
     grp_cap.add_argument("--batch-size", type=int, default=defaults.get("batch_size", 4), help="Batch size.")
     grp_cap.add_argument("--frame-count", type=int, default=defaults.get("frame_count", 8), help="Video frame count (for captioning).")
