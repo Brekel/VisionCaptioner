@@ -40,6 +40,20 @@ Built specifically for AI researchers and enthusiasts training custom models (Lo
 *   **AMD GPU** (with ROCm on Linux)
 *   **Apple Silicon Mac** (M-series, with Metal / MPS)
 
+### Windows Setup
+```bash
+git clone https://github.com/Brekel/VisionCaptioner.git
+cd VisionCaptioner
+python -m venv venv
+.\venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+pip install -r requirements.txt
+```
+
+***AMD GPU with ROCm support for Windows, more info here:***
+https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html
+
 ### Linux Setup
 
 **Python Setup:**
@@ -48,6 +62,7 @@ git clone https://github.com/Brekel/VisionCaptioner.git
 cd VisionCaptioner
 python3 -m venv venv
 source venv/bin/activate
+python3 -m pip install --upgrade pip
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 pip3 install -r requirements.txt
 ```
@@ -62,19 +77,6 @@ Some Linux systems may require additional packages for the Qt-based GUI to work:
 sudo apt install libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0
 ```
 
-### Windows Setup
-```bash
-git clone https://github.com/Brekel/VisionCaptioner.git
-cd VisionCaptioner
-python -m venv venv
-.\venv\Scripts\activate
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
-pip install -r requirements.txt
-```
-
-***AMD GPU with ROCm support for Windows, more info here:***
-https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/install/installrad/windows/install-pytorch.html
-
 ### macOS Setup (Apple Silicon)
 
 Runs on M-series Macs using Metal / MPS. Install the default PyTorch wheels (they ship MPS support, so there is **no** CUDA index URL):
@@ -83,6 +85,7 @@ git clone https://github.com/Brekel/VisionCaptioner.git
 cd VisionCaptioner
 python3 -m venv venv
 source venv/bin/activate
+python3 -m pip install --upgrade pip
 pip install torch torchvision
 pip install -r requirements.txt
 ```
@@ -90,6 +93,37 @@ Notes:
 * NVIDIA/CUDA-only packages (`bitsandbytes`, `nvidia-ml-py`, `triton`) are skipped automatically on macOS, so the Int8/NF4 quantization options are unavailable (the app loads full precision instead). Use `None (BF16)` or FP16, or a GGUF model.
 * Transformers models run on MPS. For **GGUF** models, use the built-in installer on the Captions tab (📥 button): it fetches a prebuilt **Metal** `llama-cpp-python` wheel (`pip install llama-cpp-python` does not work — see [readme_models.md](readme_models.md)).
 * Launch with `python main.py` or `./run.sh`.
+
+
+### Troubleshooting: `inconsistent Name` error while installing PyTorch
+
+If `pip install torch torchvision --index-url ...` fails with:
+
+```
+Requested typing-extensions>=4.10.0 ... has inconsistent Name:
+expected 'typing-extensions', but metadata has 'typing_extensions'
+...
+ERROR: Cannot install torch==... because these package versions have conflicting dependencies.
+```
+
+your pip is too old: it compares the raw package name instead of normalizing it, and
+`typing_extensions` / `typing-extensions` are the same package. A fresh `venv` seeds whatever pip
+shipped with your Python (Python 3.10 ships pip 23.0.1), which is why this hits on a clean install.
+Upgrading pip inside the venv is the fix, so do not skip this line:
+
+```bash
+python -m pip install --upgrade pip
+```
+
+If you cannot upgrade pip, pre-install the affected packages from PyPI before the torch command:
+
+```bash
+pip install typing-extensions jinja2
+```
+
+Do **not** work around it by switching `--index-url` to `--extra-index-url`. pip does not prioritize
+one index over the other — it merges both and picks the highest version, so you will silently get the
+CPU-only `torch` from PyPI instead of the CUDA/ROCm build.
 
 
 ## Update
