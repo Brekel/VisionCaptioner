@@ -73,8 +73,17 @@ class StopTrigger(StoppingCriteria):
 
     def __call__(self, input_ids, scores, **kwargs):
         if self.check_fn and self.check_fn():
-            return True 
+            return True
         return False
+
+
+def get_torch_device():
+    """Detects the available hardware acceleration: 'cuda', 'mps', or 'cpu'."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 class QwenEngine:
@@ -87,11 +96,7 @@ class QwenEngine:
 
     def get_device_type(self):
         """Detects the available hardware acceleration."""
-        if torch.cuda.is_available():
-            return "cuda"
-        elif torch.backends.mps.is_available():
-            return "mps"
-        return "cpu"
+        return get_torch_device()
 
     def find_files(self, folder_path, skip_existing=False, recursive=False):
         files = find_media_files(folder_path, exts=IMAGE_EXTS + VIDEO_EXTS,
@@ -324,6 +329,10 @@ class QwenEngine:
             # DataType
             torch_dtype = torch.float16
             if self.device == "cuda" and torch.cuda.is_bf16_supported():
+                torch_dtype = torch.bfloat16
+            elif self.device == "mps":
+                # MPS supports bfloat16 on recent macOS/torch. Prefer it over float16:
+                # many Qwen/Gemma VLMs are bf16-native and float16 overflows to NaN on MPS.
                 torch_dtype = torch.bfloat16
             
             # Quantization (BitsAndBytes)
@@ -684,12 +693,7 @@ class SAM3Engine:
     def __init__(self):
         self.model = None
         self.processor = None
-        if torch.cuda.is_available():
-            self.device = "cuda"
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            self.device = "mps"
-        else:
-            self.device = "cpu"
+        self.device = get_torch_device()
 
     def is_available(self):
         try:
@@ -761,6 +765,10 @@ class SAM3Engine:
             # without it some Torch/CUDA combos raise "mat1 and mat2 must have the same dtype".
             if self.device == "cuda":
                 autocast_ctx = torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+            elif self.device == "mps":
+                # MPS autocast supports float16 (not bfloat16); needed so the model's
+                # mixed bf16/fp32 weights promote consistently and avoid dtype-mismatch.
+                autocast_ctx = torch.autocast(device_type="mps", dtype=torch.float16)
             else:
                 import contextlib
                 autocast_ctx = contextlib.nullcontext()
