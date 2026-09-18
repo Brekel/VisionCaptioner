@@ -175,10 +175,14 @@ class ReviewTab(QWidget):
         self.chk_case = QCheckBox("Match Case")
         self.chk_whole = QCheckBox("Match Whole Word Only")
         self.chk_whole.setChecked(True)
-        
+        self.chk_regex = QCheckBox("Regex")
+        self.chk_regex.setToolTip("Treat the Find text as a regular expression (Replace may use \\1 style group references).\nWhole word matching is ignored in this mode, use \\b in the pattern instead.")
+        self.chk_regex.toggled.connect(lambda on: self.chk_whole.setEnabled(not on))
+
         opts_layout = QHBoxLayout()
         opts_layout.addWidget(self.chk_case)
         opts_layout.addWidget(self.chk_whole)
+        opts_layout.addWidget(self.chk_regex)
         fr_layout.addLayout(opts_layout)
         
         self.btn_apply = QPushButton("Replace All")
@@ -481,7 +485,8 @@ class ReviewTab(QWidget):
             "find_text": self.txt_find.text(), 
             "replace_text": self.txt_replace.text(), 
             "match_case": self.chk_case.isChecked(), 
-            "match_whole": self.chk_whole.isChecked(), 
+            "match_whole": self.chk_whole.isChecked(),
+            "use_regex": self.chk_regex.isChecked(),
             "show_mask": self.show_mask_state, 
             "confirm_actions": self.chk_confirm_actions.isChecked(),
             "mask_opacity": self.slider_opacity.value(), 
@@ -498,6 +503,7 @@ class ReviewTab(QWidget):
         if "replace_text" in settings: self.txt_replace.setText(settings["replace_text"])
         if "match_case" in settings: self.chk_case.setChecked(settings["match_case"])
         if "match_whole" in settings: self.chk_whole.setChecked(settings["match_whole"])
+        if "use_regex" in settings: self.chk_regex.setChecked(settings["use_regex"])
         if "show_mask" in settings:
             self.show_mask_state = settings["show_mask"]
             self.chk_show_mask.setChecked(self.show_mask_state)
@@ -1598,12 +1604,15 @@ class ReviewTab(QWidget):
         find_text = self.txt_find.text()
         if not find_text: return None, None
         
+        flags = 0 if self.chk_case.isChecked() else re.IGNORECASE
+        if self.chk_regex.isChecked():
+            return find_text, flags
+
         pattern = re.escape(find_text)
-        flags = 0
         if self.chk_whole.isChecked():
-            pattern = r"\b" + pattern + r"\b"
-        if not self.chk_case.isChecked():
-            flags = re.IGNORECASE
+            # \b only anchors next to a word character, so skip it on edges like spaces or punctuation
+            if re.match(r"\w", find_text[0]): pattern = r"\b" + pattern
+            if re.match(r"\w", find_text[-1]): pattern = pattern + r"\b"
         return pattern, flags
 
     def apply_preset(self, index):
@@ -1611,8 +1620,10 @@ class ReviewTab(QWidget):
         if data:
             self.txt_find.setText(data.get("find", ""))
             self.txt_replace.setText(data.get("replace", ""))
-            self.chk_case.setChecked(data.get("match_case", False))
-            self.chk_whole.setChecked(data.get("match_whole", False))
+            if "match_case" in data: self.chk_case.setChecked(data["match_case"])
+            if "match_whole" in data: self.chk_whole.setChecked(data["match_whole"])
+            # Unlike the toggles above, regex is a property of the find text itself, so always follow the preset
+            self.chk_regex.setChecked(data.get("regex", False))
 
     def apply_replace(self):
         pattern, flags = self.get_regex_pattern()
@@ -1620,7 +1631,14 @@ class ReviewTab(QWidget):
         
         if not pattern:
             return QMessageBox.warning(self, "Input Error", "Please enter text to find.")
-            
+
+        try:
+            regex = re.compile(pattern, flags)
+        except re.error as e:
+            return QMessageBox.warning(self, "Input Error", f"Invalid regular expression:\n{e}")
+        # In literal mode the replacement must not be parsed as a template (backslashes, \1 etc.)
+        repl = replace_text if self.chk_regex.isChecked() else (lambda m: replace_text)
+
         if self.save_timer.isActive():
             self.save_timer.stop()
             self.save_current_caption()
@@ -1632,7 +1650,7 @@ class ReviewTab(QWidget):
                 try:
                     with open(txt_path, 'r', encoding='utf-8') as f:
                         old_content = f.read()
-                    new_content, count = re.subn(pattern, replace_text, old_content, flags=flags)
+                    new_content, count = regex.subn(repl, old_content)
                     if count > 0:
                         files_to_change[txt_path] = new_content
                         original_contents[txt_path] = old_content

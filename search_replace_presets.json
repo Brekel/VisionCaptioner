@@ -21,10 +21,12 @@
     },
     "Remove 'Image of'": {
         "find": "^(An )?image of ",
+        "regex": true,
         "replace": ""
     },
     "Cleanup Whitespace": {
         "find": "\\s+",
+        "regex": true,
         "replace": " "
     },
     "Fix: Double Spaces": {
