@@ -3,7 +3,7 @@
 import os
 import pytest
 
-from file_utils import find_media_files, get_display_name, _is_in_excluded_dir, IMAGE_EXTS, VIDEO_EXTS, ALL_MEDIA_EXTS
+from file_utils import find_media_files, find_stray_sidecars, get_display_name, _is_in_excluded_dir, IMAGE_EXTS, VIDEO_EXTS, ALL_MEDIA_EXTS
 
 
 # ===========================================================================
@@ -206,3 +206,73 @@ class TestIsInExcludedDir:
     def test_excluded_dir_case_insensitive(self, tmp_path):
         filepath = os.path.join(str(tmp_path), "Unused", "img.jpg")
         assert _is_in_excluded_dir(filepath, str(tmp_path)) is True
+
+
+# ===========================================================================
+# TestFindStraySidecars
+# ===========================================================================
+
+
+def _names(paths, root):
+    return sorted(os.path.relpath(p, root).replace(os.sep, '/') for p in paths)
+
+
+class TestFindStraySidecars:
+
+    def test_paired_files_not_flagged(self, tmp_path):
+        (tmp_path / "a.jpg").write_bytes(b"x")
+        (tmp_path / "a.txt").write_text("cap")
+        (tmp_path / "a-masklabel.png").write_bytes(b"x")
+        (tmp_path / "masks").mkdir()
+        (tmp_path / "masks" / "a.png").write_bytes(b"x")
+        assert find_stray_sidecars(str(tmp_path)) == []
+
+    def test_video_caption_not_flagged(self, tmp_path):
+        (tmp_path / "clip.mp4").write_bytes(b"x")
+        (tmp_path / "clip.txt").write_text("cap")
+        (tmp_path / "clip2.flv").write_bytes(b"x")
+        (tmp_path / "clip2.txt").write_text("cap")
+        assert find_stray_sidecars(str(tmp_path)) == []
+
+    def test_case_mismatch_not_flagged(self, tmp_path):
+        (tmp_path / "Photo.JpG").write_bytes(b"x")
+        (tmp_path / "photo.txt").write_text("cap")
+        (tmp_path / "PHOTO-MaskLabel.png").write_bytes(b"x")
+        assert find_stray_sidecars(str(tmp_path)) == []
+
+    def test_orphans_flagged(self, tmp_path):
+        (tmp_path / "keep.png").write_bytes(b"x")
+        (tmp_path / "gone.txt").write_text("cap")
+        (tmp_path / "gone-masklabel.png").write_bytes(b"x")
+        (tmp_path / "masks").mkdir()
+        (tmp_path / "masks" / "gone.png").write_bytes(b"x")
+        (tmp_path / "masks" / "keep.png").write_bytes(b"x")
+        assert _names(find_stray_sidecars(str(tmp_path)), tmp_path) == [
+            "gone-masklabel.png", "gone.txt", "masks/gone.png"]
+
+    def test_masklabel_is_not_media_for_its_own_caption(self, tmp_path):
+        # foo-masklabel.png must not count as an image that "owns" foo-masklabel.txt
+        (tmp_path / "foo-masklabel.png").write_bytes(b"x")
+        (tmp_path / "foo-masklabel.txt").write_text("cap")
+        assert _names(find_stray_sidecars(str(tmp_path)), tmp_path) == [
+            "foo-masklabel.png", "foo-masklabel.txt"]
+
+    def test_excluded_dirs_never_scanned(self, tmp_path):
+        for d in ["unused", "uncropped", ".hidden"]:
+            (tmp_path / d).mkdir()
+            (tmp_path / d / "old.txt").write_text("cap")
+            (tmp_path / d / "old-masklabel.png").write_bytes(b"x")
+        assert find_stray_sidecars(str(tmp_path), recursive=True) == []
+
+    def test_flat_ignores_subdirs(self, tmp_path):
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "orphan.txt").write_text("cap")
+        assert find_stray_sidecars(str(tmp_path), recursive=False) == []
+
+    def test_recursive_pairs_per_directory(self, tmp_path):
+        (tmp_path / "a.jpg").write_bytes(b"x")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "a.txt").write_text("cap")   # image lives in root, not sub
+        (tmp_path / "sub" / "b.jpg").write_bytes(b"x")
+        (tmp_path / "sub" / "b.txt").write_text("cap")
+        assert _names(find_stray_sidecars(str(tmp_path), recursive=True), tmp_path) == ["sub/a.txt"]

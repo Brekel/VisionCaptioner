@@ -1,4 +1,5 @@
 import os
+import html
 import glob
 import re
 import cv2
@@ -6,7 +7,7 @@ import json
 import shutil
 import numpy as np
 from PIL import Image, ImageOps
-from file_utils import find_media_files, get_display_name, ALL_MEDIA_EXTS
+from file_utils import find_media_files, find_stray_sidecars, get_display_name, ALL_MEDIA_EXTS
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QListWidget, QTextEdit, QSlider, QLabel, QSplitter, QGroupBox,
                                QLineEdit, QCheckBox, QPushButton, QMessageBox, QFormLayout, QFrame, QSizePolicy, QColorDialog, QButtonGroup, QProgressDialog, QComboBox, QScrollArea, QStyle)
 from PySide6.QtCore import Qt, QTimer, Signal, QByteArray, QCoreApplication
@@ -137,11 +138,19 @@ class ReviewTab(QWidget):
         
         # Undo Delete Button
         self.btn_undo_delete = QPushButton("↩️ Undo Delete")
-        self.btn_undo_delete.setToolTip("Restore the last deleted image.")
+        self.btn_undo_delete.setToolTip("Restore the last deleted image (or the last batch of stray captions/masks).")
         self.btn_undo_delete.clicked.connect(self.undo_delete)
         self.btn_undo_delete.setEnabled(False) 
         left_layout.addWidget(self.btn_undo_delete)
-        
+
+        # Stray Sidecar Cleanup Button
+        self.btn_clean_strays = QPushButton("🧹 Clean Up Stray Captions && Masks")
+        self.btn_clean_strays.setToolTip("Find caption (.txt) and mask (-masklabel.png, masks/*.png) files\n"
+                                         "that have no matching image or video, and move them to the /unused subfolder.\n"
+                                         "Respects the Recursive setting. Can be undone with Undo Delete.")
+        self.btn_clean_strays.clicked.connect(self.move_stray_sidecars)
+        left_layout.addWidget(self.btn_clean_strays)
+
         # Batch Crop Button
         self.btn_crop_all = QPushButton("✂️ Crop All Images to Masks")
         self.btn_crop_all.setToolTip("Crop ALL images in the list to their corresponding masks.")
@@ -1184,6 +1193,75 @@ class ReviewTab(QWidget):
             self.lbl_info.setText("0 / 0")
 
 
+    def move_stray_sidecars(self):
+        """Move captions/masks without a matching media file to 'unused/'."""
+        if not self.current_folder:
+            return
+
+        # Flush a pending caption edit so it lands on the right file first.
+        if self.save_timer.isActive():
+            self.save_timer.stop()
+            self.save_current_caption(force_index=self.current_index)
+
+        strays = find_stray_sidecars(self.current_folder, recursive=self.recursive)
+        if not strays:
+            QMessageBox.information(self, "Stray Files", "No stray captions or masks found.")
+            self.log_msg.emit("🧹 No stray captions or masks found.")
+            return
+
+        rel_names = [os.path.relpath(p, self.current_folder).replace(os.sep, '/') for p in strays]
+        preview = "<br>".join(html.escape(n) for n in rel_names[:10])
+        if len(rel_names) > 10:
+            preview += f"<br>... and {len(rel_names) - 10} more (see Show Details)"
+
+        # Always confirm: an unrelated .txt (notes, readme) looks just like a stray caption.
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("Move Stray Files")
+        box.setTextFormat(Qt.RichText)
+        box.setText(f"Found <b>{len(strays)}</b> caption/mask file(s) with no matching image or video.<br><br>"
+                    f"{preview}<br><br>Move them to the <b>'unused'</b> folder?")
+        box.setDetailedText("\n".join(rel_names))
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.setDefaultButton(QMessageBox.No)
+        if box.exec() != QMessageBox.Yes:
+            return
+
+        unused_dir = os.path.join(self.current_folder, "unused")
+        moved_records = []
+        errors = []
+        for src in strays:
+            try:
+                dst = os.path.join(unused_dir, os.path.relpath(src, self.current_folder))
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                if os.path.exists(dst):
+                    base, ex = os.path.splitext(dst)
+                    n = 1
+                    while os.path.exists(f"{base}_dup_{n}{ex}"):
+                        n += 1
+                    dst = f"{base}_dup_{n}{ex}"
+                shutil.move(src, dst)
+                moved_records.append((src, dst))
+            except Exception as e:
+                errors.append(f"{os.path.basename(src)}: {e}")
+
+        if moved_records:
+            self.deleted_files_stack.append({
+                "index": self.current_index,
+                "files": moved_records,
+                "stray": True,
+            })
+            self.btn_undo_delete.setEnabled(True)
+            self.btn_undo_delete.setText(f"↩️ Undo Delete ({len(self.deleted_files_stack)})")
+
+        self.log_msg.emit(f"🧹 Moved {len(moved_records)} stray caption/mask file(s) to 'unused'.")
+        for err in errors:
+            self.log_msg.emit(f"❌ Could not move {err}")
+        if errors:
+            QMessageBox.warning(self, "Stray Files",
+                                f"Moved {len(moved_records)} file(s); {len(errors)} failed:\n\n" + "\n".join(errors[:10]))
+        self.update_stats()
+
     def fill_mask(self, color):
         if self.cv_img_original is None: return
         
@@ -1749,7 +1827,12 @@ class ReviewTab(QWidget):
                     os.makedirs(os.path.dirname(original_path), exist_ok=True)
                     shutil.move(current_path, original_path)
                     restored_files.append(original_path)
-            
+
+            if record.get("stray"):
+                self.log_msg.emit(f"♻️ Restored {len(restored_files)} stray caption/mask file(s).")
+                self.update_stats()
+                restored_files = []  # nothing to select; skip image identification below
+
             # Identify the main image file from restored files
             # (It's the one that matches our supported extensions and isn't a mask/txt)
             exts = ('.jpg', '.jpeg', '.png', '.webp', '.bmp', '.mp4', '.mkv', '.avi', '.mov', '.webm')
@@ -1759,7 +1842,9 @@ class ReviewTab(QWidget):
                     img_file = f
                     break
             
-            if img_file:
+            if record.get("stray"):
+                pass
+            elif img_file:
                 user_index = record["index"]
                 
                 # Insert back into list
@@ -1783,8 +1868,6 @@ class ReviewTab(QWidget):
             self.btn_undo_delete.setText("↩️ Undo Delete")
         else:
             self.btn_undo_delete.setText(f"↩️ Undo Delete ({len(self.deleted_files_stack)})")
-        if 0 <= new_row < len(self.image_files):
-            self.list_widget.setCurrentRow(new_row)
 
     def _push_undo_state(self):
         """Saves a copy of the current mask to the undo stack."""

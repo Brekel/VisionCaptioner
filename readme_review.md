@@ -8,6 +8,7 @@ The Review & Edit tab is used to review and edit your captions and masks.
 * Here you can select a file from the list to review and edit its caption and mask.
 * Stats are displayed to easily see if there are missing Captions and/or Masks.
 * There are tools to delete files (they are moved to a subfolder named "unused").
+* "Clean Up Stray Captions & Masks" finds caption (`.txt`) and mask (`-masklabel.png`, `masks/*.png`) files that no longer have a matching image or video and moves them to "unused" too. It always shows the list and asks before moving, and "Undo Delete" puts them back.
 * There are tools to find/replace text elements in all files at once.
   * You can define search & replace presets, have a look at the [search_replace_presets.json](search_replace_presets.json) file.
   * Enable "Regex" to treat the Find text as a regular expression. Presets can opt in with `"regex": true`, and may optionally pin `"match_case"` / `"match_whole"` (otherwise those toggles are left as you set them).

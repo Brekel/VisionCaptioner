@@ -63,6 +63,72 @@ def get_display_name(filepath, root_folder, recursive=False):
     return os.path.basename(filepath)
 
 
+MASKLABEL_SUFFIX = '-masklabel.png'
+MASK_SUBDIR = 'masks'
+
+
+def find_stray_sidecars(folder_path, recursive=False):
+    """
+    Find caption and mask files that have no matching media file.
+
+    Sidecars checked per directory:
+      - <stem>.txt               (caption)
+      - <stem>-masklabel.png     (separate mask)
+      - masks/<stem>.png         (subfolder mask, paired with the parent dir)
+
+    Matching is case-insensitive and accepts any media extension (images and
+    videos, any letter case). Excluded dirs (unused/, uncropped/, hidden) are
+    never scanned. Returns a sorted list of absolute paths.
+    """
+    media_exts = {e.lstrip('*').lower() for e in ALL_MEDIA_EXTS}
+
+    if recursive:
+        dirs = []
+        for dirpath, dirnames, _ in os.walk(folder_path):
+            dirnames[:] = [d for d in dirnames
+                           if d.lower() not in EXCLUDED_DIRS and not d.startswith('.')]
+            dirs.append(dirpath)
+    else:
+        dirs = [folder_path]
+
+    strays = []
+    for d in dirs:
+        try:
+            names = [n for n in os.listdir(d) if os.path.isfile(os.path.join(d, n))]
+        except OSError:
+            continue
+
+        media_stems = set()
+        for n in names:
+            stem, ext = os.path.splitext(n)
+            if ext.lower() in media_exts and not n.lower().endswith(MASKLABEL_SUFFIX):
+                media_stems.add(stem.lower())
+
+        for n in names:
+            low = n.lower()
+            if low.endswith(MASKLABEL_SUFFIX):
+                stem = n[:-len(MASKLABEL_SUFFIX)]
+            elif low.endswith('.txt'):
+                stem = n[:-4]
+            else:
+                continue
+            if stem.lower() not in media_stems:
+                strays.append(os.path.join(d, n))
+
+        # masks/ subfolder (any case), paired against this directory's media
+        for sub in os.listdir(d):
+            sub_path = os.path.join(d, sub)
+            if sub.lower() != MASK_SUBDIR or not os.path.isdir(sub_path):
+                continue
+            for n in os.listdir(sub_path):
+                stem, ext = os.path.splitext(n)
+                if ext.lower() == '.png' and os.path.isfile(os.path.join(sub_path, n)) \
+                        and stem.lower() not in media_stems:
+                    strays.append(os.path.join(sub_path, n))
+
+    return sorted(strays)
+
+
 def _is_in_excluded_dir(filepath, root):
     """Check if filepath is inside an excluded subdirectory relative to root."""
     rel = os.path.relpath(filepath, root)
